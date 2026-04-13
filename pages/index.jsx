@@ -72,6 +72,17 @@ function MicButton({ on, onClick, disabled }) {
         }
         *, *::before, *::after { box-sizing: border-box; }
         html, body { margin: 0; padding: 0; }
+
+        /* ── Mobile Responsive (ستون‌ها همیشه افقی) ── */
+        @media (max-width: 768px) {
+          .translator-grid {
+            gap: 6px !important;
+          }
+          .panel {
+            padding: 6px !important;
+            font-size: 13px !important;
+          }
+        }
       `}</style>
     </>
   );
@@ -89,8 +100,7 @@ function Panel({ title, sentences, interim, active, fa, isTranslation }) {
   const hasContent = sentences.some(s => isTranslation ? s.translation : s.text) || interim;
 
   return (
-    /* height:100% fills the grid cell completely */
-    <div style={{
+    <div className="panel" style={{
       height: "100%",
       display: "flex", flexDirection: "column",
       background: "linear-gradient(160deg,#0f0f1e,#0a0a16)",
@@ -99,7 +109,7 @@ function Panel({ title, sentences, interim, active, fa, isTranslation }) {
       direction: fa ? "rtl" : "ltr",
     }}>
 
-      {/* ── header ── */}
+      {/* header */}
       <div style={{
         padding: "7px 10px", flexShrink: 0,
         borderBottom: "1px solid rgba(255,255,255,.05)",
@@ -115,7 +125,7 @@ function Panel({ title, sentences, interim, active, fa, isTranslation }) {
         <WaveBars active={active} color={color} />
       </div>
 
-      {/* ── body ── */}
+      {/* body */}
       <div
         ref={scrollRef}
         style={{
@@ -139,7 +149,6 @@ function Panel({ title, sentences, interim, active, fa, isTranslation }) {
           const last = i === sentences.length - 1;
           const text = isTranslation ? s.translation : s.text;
 
-          /* hide translation slot until we have something to show */
           if (isTranslation && !s.translation && !s.translating) return null;
 
           return (
@@ -189,22 +198,21 @@ export default function Home() {
   const [micLang,   setMicLang]   = useState("fa");
   const [detected,  setDetected]  = useState(null);
   const [supported, setSupported] = useState(true);
-  const [apiError,  setApiError]  = useState("");   // ← shows raw API error
+  const [apiError,  setApiError]  = useState("");
   const [interim,   setInterim]   = useState("");
   const [sentences, setSentences] = useState([]);
 
-  const recRef   = useRef(null);
-  const alive    = useRef(false);
-  const timer    = useRef(null);
-  const langRef  = useRef("fa");   // always current lang without closure issues
-  const startRef = useRef(null);   // always current start()
+  const recRef         = useRef(null);
+  const alive          = useRef(false);
+  const timer          = useRef(null);
+  const langRef        = useRef("fa");
+  const startRef       = useRef(null);
+  const lastFinalRef   = useRef("");        // ← جلوگیری از تکرار ترنسکریپت
 
-  /* keep langRef in sync */
   useEffect(() => { langRef.current = micLang; }, [micLang]);
 
   /* ── translate ──────────────────────────────────────── */
   const translate = useCallback(async (id, text) => {
-    /* mark as translating */
     setSentences(prev =>
       prev.map(s => s.id === id ? { ...s, translating: true } : s)
     );
@@ -219,7 +227,6 @@ export default function Home() {
 
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
 
-      /* auto-switch mic language based on what GPT detected */
       if (data.detected && data.detected !== langRef.current) {
         langRef.current = data.detected;
         setMicLang(data.detected);
@@ -236,7 +243,7 @@ export default function Home() {
       );
     } catch (e) {
       console.error("[translate]", e);
-      setApiError(e.message);   // show exact error so user can debug
+      setApiError(e.message);
       setSentences(prev =>
         prev.map(s => s.id === id ? { ...s, translating: false } : s)
       );
@@ -262,7 +269,8 @@ export default function Home() {
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
           const txt = e.results[i][0].transcript.trim();
-          if (txt) {
+          if (txt && txt !== lastFinalRef.current) {   // ← فیکس تکرار
+            lastFinalRef.current = txt;
             const id = crypto.randomUUID();
             setSentences(prev => [
               ...prev,
@@ -286,7 +294,6 @@ export default function Home() {
       }
     };
 
-    /* auto-restart using ref so we always call the freshest start() */
     rec.onend = () => {
       if (alive.current) {
         timer.current = setTimeout(() => alive.current && startRef.current?.(), 60);
@@ -297,7 +304,6 @@ export default function Home() {
     try { rec.start(); } catch { setTimeout(() => startRef.current?.(), 120); }
   }, [translate]);
 
-  /* keep startRef current */
   useEffect(() => { startRef.current = start; }, [start]);
 
   /* ── toggle ─────────────────────────────────────────── */
@@ -309,7 +315,11 @@ export default function Home() {
       setOn(false);
       setInterim("");
     } else {
-      setSentences([]); setDetected(null); setApiError(""); setInterim("");
+      setSentences([]);
+      setDetected(null);
+      setApiError("");
+      setInterim("");
+      lastFinalRef.current = "";        // ← ریست کردن هنگام شروع جدید
       alive.current = true;
       setOn(true);
       start();
@@ -342,7 +352,7 @@ export default function Home() {
         overflow: "hidden",
       }}>
 
-        {/* ── header ───────────────────────────────────── */}
+        {/* header */}
         <header style={{
           display: "flex", alignItems: "center",
           justifyContent: "space-between", flexShrink: 0,
@@ -379,62 +389,36 @@ export default function Home() {
           </div>
         </header>
 
-        {/* ── panels (CSS Grid — ALWAYS side by side) ──── */}
+        {/* panels - همیشه افقی (حتی توی موبایل) */}
         <div style={{
           flex: 1,
           minHeight: 0,
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",   /* two equal columns, no wrapping possible */
-          gridTemplateRows: "1fr",           /* single row fills available height */
+          gridTemplateColumns: "1fr 1fr",
+          gridTemplateRows: "1fr",
           gap: 8,
-        }}>
+        }} className="translator-grid">
           {faInput ? (
             <>
-              <Panel
-                title="ENGLISH"
-                sentences={sentences}
-                active={sentences.some(s => s.translating)}
-                fa={false}
-                isTranslation={true}
-              />
-              <Panel
-                title="فارسی"
-                sentences={sentences}
-                interim={interim}
-                active={on}
-                fa={true}
-                isTranslation={false}
-              />
+              <Panel title="ENGLISH" sentences={sentences} active={sentences.some(s => s.translating)} fa={false} isTranslation={true} />
+              <Panel title="فارسی" sentences={sentences} interim={interim} active={on} fa={true} isTranslation={false} />
             </>
           ) : (
             <>
-              <Panel
-                title="ENGLISH"
-                sentences={sentences}
-                interim={interim}
-                active={on}
-                fa={false}
-                isTranslation={false}
-              />
-              <Panel
-                title="فارسی"
-                sentences={sentences}
-                active={sentences.some(s => s.translating)}
-                fa={true}
-                isTranslation={true}
-              />
+              <Panel title="ENGLISH" sentences={sentences} interim={interim} active={on} fa={false} isTranslation={false} />
+              <Panel title="فارسی" sentences={sentences} active={sentences.some(s => s.translating)} fa={true} isTranslation={true} />
             </>
           )}
         </div>
 
-        {/* ── controls ─────────────────────────────────── */}
+        {/* controls */}
         <div style={{
           display: "flex", alignItems: "center",
           justifyContent: "center", gap: 20,
           flexShrink: 0, paddingBottom: 4,
         }}>
           <button
-            onClick={() => { if (!on) { setSentences([]); setApiError(""); } }}
+            onClick={() => { if (!on) { setSentences([]); setApiError(""); lastFinalRef.current = ""; } }}
             disabled={on}
             style={{
               padding: "6px 14px", borderRadius: 8,
@@ -462,7 +446,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ── status / errors ───────────────────────────── */}
+        {/* status */}
         {!supported && (
           <p style={{ margin: 0, textAlign: "center", color: "#ff6b6b", fontSize: 11 }}>
             مرورگر شما Speech Recognition را پشتیبانی نمی‌کند
@@ -478,7 +462,6 @@ export default function Home() {
             ● LISTENING
           </p>
         )}
-
       </main>
     </>
   );
