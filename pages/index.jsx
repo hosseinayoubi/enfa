@@ -1,6 +1,81 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Head from "next/head";
 
+// ── Audio Visualizer Component ─────────────────────────────────────────────
+function AudioVisualizer({ stream, isListening }) {
+  const canvasRef = useRef(null);
+  const animationRef = useRef(null);
+  const analyserRef = useRef(null);
+
+  useEffect(() => {
+    if (!stream || !isListening) return;
+    
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.8;
+    
+    const source = audioCtx.createMediaStreamSource(stream);
+    source.connect(analyser);
+    analyserRef.current = analyser;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    
+    const draw = () => {
+      if (!isListening) return;
+      animationRef.current = requestAnimationFrame(draw);
+      
+      analyser.getByteFrequencyData(dataArray);
+      ctx.fillStyle = "#0f0f1e";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      const barWidth = (canvas.width / bufferLength) * 2.5;
+      let barHeight;
+      let x = 0;
+      
+      for (let i = 0; i < bufferLength; i++) {
+        barHeight = (dataArray[i] / 255) * canvas.height;
+        const r = barHeight + 25;
+        const g = 250 * (i / bufferLength);
+        const b = 50;
+        
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+        x += barWidth + 1;
+      }
+    };
+    
+    draw();
+    
+    return () => {
+      cancelAnimationFrame(animationRef.current);
+      audioCtx.close();
+    };
+  }, [stream, isListening]);
+
+  if (!isListening) return null;
+  
+  return (
+    <canvas 
+      ref={canvasRef} 
+      width={300} 
+      height={60} 
+      style={{
+        position: "fixed",
+        bottom: 100,
+        left: "50%",
+        transform: "translateX(-50%)",
+        borderRadius: 8,
+        opacity: 0.8,
+        zIndex: 100
+      }}
+    />
+  );
+}
+
 // ── Wave bars animation component ──────────────────────────────────────────
 function WaveBars({ active, color }) {
   const bars = Array.from({ length: 9 });
@@ -33,7 +108,7 @@ function WaveBars({ active, color }) {
 }
 
 // ── Language Badge ──────────────────────────────────────────────────────────
-function LangBadge({ lang }) {
+function LangBadge({ lang, confidence }) {
   const map = {
     fa: { label: "فارسی", color: "#f5a623" },
     en: { label: "English", color: "#00d4ff" },
@@ -41,72 +116,81 @@ function LangBadge({ lang }) {
   if (!lang) return null;
   const { label, color } = map[lang] || {};
   return (
-    <span
-      style={{
-        fontSize: 11,
-        fontFamily: "'Courier Prime', monospace",
-        letterSpacing: 1,
-        padding: "2px 9px",
-        borderRadius: 20,
-        border: `1px solid ${color}55`,
-        color,
-        background: `${color}15`,
-        textTransform: "uppercase",
-      }}
-    >
-      {label}
-    </span>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+      <span
+        style={{
+          fontSize: 11,
+          fontFamily: "'Courier Prime', monospace",
+          letterSpacing: 1,
+          padding: "2px 9px",
+          borderRadius: 20,
+          border: `1px solid ${color}55`,
+          color,
+          background: `${color}15`,
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </span>
+      {confidence && (
+        <span style={{ fontSize: 9, color: `${color}88` }}>
+          {Math.round(confidence * 100)}%
+        </span>
+      )}
+    </div>
   );
 }
 
 // ── Mic Button ──────────────────────────────────────────────────────────────
-function MicButton({ isListening, onClick, disabled }) {
+function MicButton({ isListening, onClick, disabled, volume }) {
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        position: "relative",
-        width: 80,
-        height: 80,
-        borderRadius: "50%",
-        border: "none",
-        cursor: disabled ? "not-allowed" : "pointer",
-        background: isListening
-          ? "radial-gradient(circle, #ff4081, #c2185b)"
-          : "radial-gradient(circle, #1e1e35, #141428)",
-        boxShadow: isListening
-          ? "0 0 0 0 rgba(255,64,129,0.5), 0 0 30px rgba(255,64,129,0.4)"
-          : "0 0 0 0 transparent, 0 4px 20px rgba(0,0,0,0.6)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
-        transform: isListening ? "scale(1.1)" : "scale(1)",
-        animation: isListening ? "pulse-ring 1.4s ease-out infinite" : "none",
-        outline: "none",
-        flexShrink: 0,
-      }}
-      aria-label={isListening ? "Stop" : "Start listening"}
-    >
-      {isListening ? (
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
-          <rect x="6" y="6" width="12" height="12" rx="2" />
-        </svg>
-      ) : (
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
-          <path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z" />
-          <path
-            d="M19 11a7 7 0 0 1-14 0"
-            stroke="white"
-            strokeWidth="2"
-            fill="none"
-            strokeLinecap="round"
-          />
-          <line x1="12" y1="19" x2="12" y2="23" stroke="white" strokeWidth="2" strokeLinecap="round" />
-          <line x1="9" y1="23" x2="15" y2="23" stroke="white" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      )}
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        style={{
+          position: "relative",
+          width: 80,
+          height: 80,
+          borderRadius: "50%",
+          border: "none",
+          cursor: disabled ? "not-allowed" : "pointer",
+          background: isListening
+            ? "radial-gradient(circle, #ff4081, #c2185b)"
+            : "radial-gradient(circle, #1e1e35, #141428)",
+          boxShadow: isListening
+            ? `0 0 0 0 rgba(255,64,129,0.5), 0 0 ${30 + (volume || 0) * 20}px rgba(255,64,129,0.${6 + (volume || 0) * 4})`
+            : "0 0 0 0 transparent, 0 4px 20px rgba(0,0,0,0.6)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          transition: "all 0.1s ease",
+          transform: isListening ? `scale(${1 + (volume || 0) * 0.2})` : "scale(1)",
+          animation: isListening ? "pulse-ring 1.4s ease-out infinite" : "none",
+          outline: "none",
+          flexShrink: 0,
+        }}
+        aria-label={isListening ? "Stop" : "Start listening"}
+      >
+        {isListening ? (
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+          </svg>
+        ) : (
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
+            <path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z" />
+            <path
+              d="M19 11a7 7 0 0 1-14 0"
+              stroke="white"
+              strokeWidth="2"
+              fill="none"
+              strokeLinecap="round"
+            />
+            <line x1="12" y1="19" x2="12" y2="23" stroke="white" strokeWidth="2" strokeLinecap="round" />
+            <line x1="9" y1="23" x2="15" y2="23" stroke="white" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        )}
+      </button>
       <style>{`
         @keyframes pulse-ring {
           0%   { box-shadow: 0 0 0 0 rgba(255,64,129,0.5), 0 0 30px rgba(255,64,129,0.4); }
@@ -114,15 +198,14 @@ function MicButton({ isListening, onClick, disabled }) {
           100% { box-shadow: 0 0 0 0 rgba(255,64,129,0), 0 0 30px rgba(255,64,129,0.4); }
         }
       `}</style>
-    </button>
+    </div>
   );
 }
 
-// ── Original Speech Panel ───────────────────────────────────────────────────
-function TextPanel({ title, sentences, interimText, isActive, side }) {
+// ── Text Panel ──────────────────────────────────────────────────────────────
+function TextPanel({ title, sentences, interimText, isActive, side, confidence }) {
   const isPersian = side === "right";
   const borderColor = side === "right" ? "#f5a623" : "#00d4ff";
-  const glowColor = side === "right" ? "rgba(245,166,35,0.12)" : "rgba(0,212,255,0.1)";
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -145,7 +228,7 @@ function TextPanel({ title, sentences, interimText, isActive, side }) {
         overflow: "hidden",
         transition: "border-color 0.4s ease, box-shadow 0.4s ease",
         boxShadow: isActive
-          ? `0 0 40px ${glowColor}, inset 0 0 30px ${glowColor}`
+          ? `0 0 40px ${side === "right" ? "rgba(245,166,35,0.12)" : "rgba(0,212,255,0.1)"}, inset 0 0 30px ${side === "right" ? "rgba(245,166,35,0.12)" : "rgba(0,212,255,0.1)"}`
           : "0 4px 30px rgba(0,0,0,0.4)",
         direction: isPersian ? "rtl" : "ltr",
       }}
@@ -159,18 +242,25 @@ function TextPanel({ title, sentences, interimText, isActive, side }) {
           justifyContent: "space-between",
         }}
       >
-        <span
-          style={{
-            fontSize: 11,
-            fontFamily: "'Courier Prime', monospace",
-            letterSpacing: 2,
-            color: isActive ? borderColor : "rgba(255,255,255,0.25)",
-            textTransform: "uppercase",
-            transition: "color 0.3s",
-          }}
-        >
-          {title}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span
+            style={{
+              fontSize: 11,
+              fontFamily: "'Courier Prime', monospace",
+              letterSpacing: 2,
+              color: isActive ? borderColor : "rgba(255,255,255,0.25)",
+              textTransform: "uppercase",
+              transition: "color 0.3s",
+            }}
+          >
+            {title}
+          </span>
+          {confidence > 0 && (
+            <span style={{ fontSize: 10, color: `${borderColor}88`, fontFamily: "monospace" }}>
+              {(confidence * 100).toFixed(0)}%
+            </span>
+          )}
+        </div>
         <WaveBars active={isActive} color={borderColor} />
       </div>
 
@@ -213,6 +303,7 @@ function TextPanel({ title, sentences, interimText, isActive, side }) {
                     borderLeft: isPersian ? "none" : `2px solid ${isLast ? borderColor + "55" : "rgba(255,255,255,0.06)"}`,
                     borderRight: isPersian ? `2px solid ${isLast ? borderColor + "55" : "rgba(255,255,255,0.06)"}` : "none",
                     transition: "background 0.3s",
+                    opacity: s.isFinal ? 1 : 0.7,
                   }}
                 >
                   <p
@@ -227,8 +318,13 @@ function TextPanel({ title, sentences, interimText, isActive, side }) {
                       transition: "color 0.4s",
                     }}
                   >
-                    {s.original}
+                    {s.text}
                   </p>
+                  {s.confidence && s.confidence < 0.8 && (
+                    <span style={{ fontSize: 10, color: "#ff6b6b", marginTop: 4, display: "block" }}>
+                      دقت پایین - نزدیک‌تر صحبت کنید
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -239,6 +335,7 @@ function TextPanel({ title, sentences, interimText, isActive, side }) {
                   padding: "10px 14px",
                   borderLeft: isPersian ? "none" : `2px solid ${borderColor}33`,
                   borderRight: isPersian ? `2px solid ${borderColor}33` : "none",
+                  animation: "pulse 1s ease-in-out infinite",
                 }}
               >
                 <p
@@ -258,6 +355,12 @@ function TextPanel({ title, sentences, interimText, isActive, side }) {
           </>
         )}
       </div>
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -266,7 +369,6 @@ function TextPanel({ title, sentences, interimText, isActive, side }) {
 function TranslationPanel({ title, sentences, isActive, side }) {
   const isPersian = side === "right";
   const borderColor = side === "right" ? "#f5a623" : "#00d4ff";
-  const glowColor = side === "right" ? "rgba(245,166,35,0.12)" : "rgba(0,212,255,0.1)";
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -289,7 +391,7 @@ function TranslationPanel({ title, sentences, isActive, side }) {
         overflow: "hidden",
         transition: "border-color 0.4s ease, box-shadow 0.4s ease",
         boxShadow: isActive
-          ? `0 0 40px ${glowColor}, inset 0 0 30px ${glowColor}`
+          ? `0 0 40px ${side === "right" ? "rgba(245,166,35,0.12)" : "rgba(0,212,255,0.1)"}, inset 0 0 30px ${side === "right" ? "rgba(245,166,35,0.12)" : "rgba(0,212,255,0.1)"}`
           : "0 4px 30px rgba(0,0,0,0.4)",
         direction: isPersian ? "rtl" : "ltr",
       }}
@@ -404,16 +506,72 @@ export default function Home() {
   const [supported, setSupported] = useState(true);
   const [error, setError] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
+  const [audioStream, setAudioStream] = useState(null);
+  const [volume, setVolume] = useState(0);
+  const [avgConfidence, setAvgConfidence] = useState(0);
 
-  // Each item: { id, original, translation, translating }
   const [sentences, setSentences] = useState([]);
 
   const recognitionRef = useRef(null);
   const isListeningRef = useRef(false);
   const idCounterRef = useRef(0);
-  const restartRef = useRef(null); // always points to latest createAndStart fn
+  const restartTimeoutRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const volumeIntervalRef = useRef(null);
 
-  // ── Translate a single sentence immediately ─────────────────────────────
+  // ── Volume Monitor ───────────────────────────────────────────────────────
+  const startVolumeMonitor = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 44100
+        } 
+      });
+      setAudioStream(stream);
+      
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 32;
+      
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+      
+      audioContextRef.current = audioCtx;
+      analyserRef.current = analyser;
+      
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      
+      volumeIntervalRef.current = setInterval(() => {
+        analyser.getByteFrequencyData(dataArray);
+        const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+        const normalized = Math.min(average / 128, 1);
+        setVolume(normalized);
+      }, 100);
+      
+    } catch (err) {
+      console.error("Audio access error:", err);
+    }
+  }, []);
+
+  const stopVolumeMonitor = useCallback(() => {
+    if (volumeIntervalRef.current) {
+      clearInterval(volumeIntervalRef.current);
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+    }
+    if (audioStream) {
+      audioStream.getTracks().forEach(track => track.stop());
+    }
+    setAudioStream(null);
+    setVolume(0);
+  }, [audioStream]);
+
+  // ── Translate ─────────────────────────────────────────────────────────────
   const translateSentence = useCallback(async (id, text) => {
     setSentences((prev) =>
       prev.map((s) => (s.id === id ? { ...s, translating: true } : s))
@@ -432,7 +590,7 @@ export default function Home() {
           s.id === id ? { ...s, translation: data.translation, translating: false } : s
         )
       );
-    } catch {
+    } catch (e) {
       setError("ترجمه ناموفق بود. API key رو چک کن.");
       setSentences((prev) =>
         prev.map((s) => (s.id === id ? { ...s, translating: false } : s))
@@ -440,87 +598,150 @@ export default function Home() {
     }
   }, []);
 
-  // ── Create a fresh recognition instance and start it ───────────────────
-  // Called both on first start AND on every auto-restart after onend.
-  // Creating a NEW instance each time avoids Chrome's InvalidStateError
-  // when trying to re-start a recognition that already stopped.
+  // ── Create Recognition ───────────────────────────────────────────────────
   const createAndStart = useCallback(() => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { setSupported(false); return; }
-    if (!isListeningRef.current) return; // user already stopped
+    if (!isListeningRef.current) return;
 
-    // Stop & discard old instance cleanly
-    try { recognitionRef.current?.stop(); } catch {}
-    recognitionRef.current = null;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      setSupported(false);
+      return;
+    }
+
+    // Cleanup old
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
+      recognitionRef.current = null;
+    }
 
     const rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
+    rec.maxAlternatives = 1;
     rec.lang = micLang === "fa" ? "fa-IR" : "en-US";
+    
+    // Chrome mobile optimization
+    if ('serviceURI' in rec) {
+      rec.serviceURI = 'https://www.google.com/speech-api/v2/recognize';
+    }
+
+    let lastResultTime = Date.now();
 
     rec.onresult = (e) => {
+      lastResultTime = Date.now();
       let interim = "";
+      let finalConfidence = 0;
+      
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const result = e.results[i];
+        const transcript = result[0].transcript.trim();
+        
         if (result.isFinal) {
-          const finalText = result[0].transcript.trim();
-          if (!finalText) continue;
+          finalConfidence = result[0].confidence || 0.9;
+          if (!transcript) continue;
+          
           const newId = ++idCounterRef.current;
           setSentences((prev) => [
             ...prev,
-            { id: newId, original: finalText, translation: null, translating: false },
+            { 
+              id: newId, 
+              text: transcript, 
+              original: transcript,
+              translation: null, 
+              translating: false,
+              confidence: finalConfidence,
+              isFinal: true
+            },
           ]);
-          translateSentence(newId, finalText);
+          translateSentence(newId, transcript);
+          setInterimTranscript("");
         } else {
-          interim += result[0].transcript;
+          interim += transcript;
         }
       }
+      
       setInterimTranscript(interim);
+      if (finalConfidence > 0) {
+        setAvgConfidence(finalConfidence);
+      }
     };
 
     rec.onerror = (e) => {
-      // no-speech is normal Chrome behaviour during silence — ignore it
-      if (e.error === "no-speech" || e.error === "aborted") return;
-      setError(`خطا: ${e.error}`);
-      isListeningRef.current = false;
-      setIsListening(false);
-    };
-
-    rec.onend = () => {
-      // Chrome can end the session for many reasons even with continuous=true.
-      // Wait 200 ms then call restartRef (always the latest createAndStart),
-      // which creates a BRAND NEW instance — avoids InvalidStateError.
-      if (isListeningRef.current) {
-        setTimeout(() => restartRef.current?.(), 200);
+      console.error("Speech recognition error:", e.error, e.message);
+      
+      // Ignore non-critical errors
+      if (e.error === "no-speech") {
+        // No speech detected, continue listening
+        return;
+      }
+      if (e.error === "aborted") {
+        // User stopped or restarted
+        return;
+      }
+      
+      setError(`خطا: ${e.error} - ${e.message || ''}`);
+      
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        isListeningRef.current = false;
+        setIsListening(false);
       }
     };
 
+    rec.onend = () => {
+      const timeSinceLastResult = Date.now() - lastResultTime;
+      
+      // Immediate restart if still listening
+      if (isListeningRef.current) {
+        // Clear any existing timeout
+        if (restartTimeoutRef.current) {
+          clearTimeout(restartTimeoutRef.current);
+        }
+        
+        // Shorter delay if we just got results (more responsive)
+        const delay = timeSinceLastResult < 1000 ? 50 : 150;
+        
+        restartTimeoutRef.current = setTimeout(() => {
+          if (isListeningRef.current) {
+            createAndStart();
+          }
+        }, delay);
+      }
+    };
+
+    rec.onstart = () => {
+      console.log("Recognition started");
+      setError("");
+    };
+
     recognitionRef.current = rec;
+    
     try {
       rec.start();
     } catch (err) {
-      console.error("Recognition start failed:", err);
-      // retry once after a short delay
-      setTimeout(() => restartRef.current?.(), 500);
+      console.error("Start error:", err);
+      // Retry once
+      setTimeout(() => {
+        if (isListeningRef.current) createAndStart();
+      }, 300);
     }
   }, [micLang, translateSentence]);
 
-  // Keep restartRef always pointing to the latest createAndStart
-  useEffect(() => {
-    restartRef.current = createAndStart;
-  }, [createAndStart]);
-
-  // ── Toggle Listening ────────────────────────────────────────────────────
-  const toggleListening = useCallback(() => {
+  // ── Toggle Listening ─────────────────────────────────────────────────────
+  const toggleListening = useCallback(async () => {
     if (isListeningRef.current) {
       // Stop
       isListeningRef.current = false;
+      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+      
       try { recognitionRef.current?.stop(); } catch {}
       recognitionRef.current = null;
+      
+      stopVolumeMonitor();
       setIsListening(false);
       setInterimTranscript("");
+      setVolume(0);
     } else {
-      // Start fresh
+      // Start
       setSentences([]);
       setDetectedLang(null);
       setError("");
@@ -528,9 +749,11 @@ export default function Home() {
       idCounterRef.current = 0;
       isListeningRef.current = true;
       setIsListening(true);
+      
+      await startVolumeMonitor();
       createAndStart();
     }
-  }, [createAndStart]);
+  }, [createAndStart, startVolumeMonitor, stopVolumeMonitor]);
 
   const clearAll = () => {
     if (!isListeningRef.current) {
@@ -544,11 +767,14 @@ export default function Home() {
   useEffect(() => {
     return () => {
       isListeningRef.current = false;
+      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
       recognitionRef.current?.stop();
+      stopVolumeMonitor();
     };
-  }, []);
+  }, [stopVolumeMonitor]);
 
-  const originalLang = detectedLang || micLang;
+  // Determine layout
+  const isOriginalPersian = detectedLang === "fa" || (!detectedLang && micLang === "fa");
 
   return (
     <>
@@ -569,7 +795,7 @@ export default function Home() {
             "radial-gradient(ellipse at 20% 0%, rgba(0,212,255,0.04) 0%, transparent 50%), radial-gradient(ellipse at 80% 100%, rgba(245,166,35,0.05) 0%, transparent 50%), #07070f",
         }}
       >
-        {/* ── Header ── */}
+        {/* Header */}
         <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <h1
@@ -644,34 +870,36 @@ export default function Home() {
           </div>
         </header>
 
-        {/* ── Panels ── */}
+        {/* Panels */}
         <div style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
-          {/* LEFT = English */}
-          {originalLang === "en" ? (
-            <TextPanel
-              title="ENGLISH"
-              side="left"
-              sentences={sentences}
-              interimText={interimTranscript}
-              isActive={isListening}
-            />
-          ) : (
+          {/* Left Panel */}
+          {isOriginalPersian ? (
             <TranslationPanel
               title="ENGLISH"
               side="left"
               sentences={sentences}
               isActive={sentences.some((s) => s.translating)}
             />
+          ) : (
+            <TextPanel
+              title="ENGLISH"
+              side="left"
+              sentences={sentences}
+              interimText={interimTranscript}
+              isActive={isListening}
+              confidence={avgConfidence}
+            />
           )}
 
-          {/* RIGHT = Persian */}
-          {originalLang === "fa" ? (
+          {/* Right Panel */}
+          {isOriginalPersian ? (
             <TextPanel
               title="فارسی"
               side="right"
               sentences={sentences}
               interimText={interimTranscript}
               isActive={isListening}
+              confidence={avgConfidence}
             />
           ) : (
             <TranslationPanel
@@ -683,7 +911,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* ── Control Bar ── */}
+        {/* Controls */}
         <div
           style={{
             display: "flex",
@@ -691,6 +919,7 @@ export default function Home() {
             justifyContent: "center",
             gap: 24,
             paddingBottom: 4,
+            position: "relative",
           }}
         >
           <button
@@ -713,14 +942,40 @@ export default function Home() {
             CLEAR
           </button>
 
-          <MicButton isListening={isListening} onClick={toggleListening} disabled={!supported} />
+          <MicButton 
+            isListening={isListening} 
+            onClick={toggleListening} 
+            disabled={!supported}
+            volume={volume}
+          />
 
           <div style={{ minWidth: 80, display: "flex", justifyContent: "flex-start" }}>
-            {detectedLang && <LangBadge lang={detectedLang} />}
+            {detectedLang && <LangBadge lang={detectedLang} confidence={avgConfidence} />}
           </div>
         </div>
 
-        {/* ── Status / Errors ── */}
+        {/* Volume indicator bar */}
+        {isListening && (
+          <div style={{ 
+            width: "100%", 
+            maxWidth: 300, 
+            margin: "0 auto", 
+            height: 4, 
+            background: "rgba(255,255,255,0.1)",
+            borderRadius: 2,
+            overflow: "hidden"
+          }}>
+            <div style={{
+              width: `${volume * 100}%`,
+              height: "100%",
+              background: `linear-gradient(90deg, #00d4ff, #ff4081)`,
+              transition: "width 0.1s ease",
+              borderRadius: 2
+            }} />
+          </div>
+        )}
+
+        {/* Status */}
         {!supported && (
           <div style={{ textAlign: "center", color: "#ff6b6b", fontSize: 13, fontFamily: "'Vazirmatn', sans-serif" }}>
             مرورگرت Speech Recognition رو ساپورت نمیکنه. از Chrome استفاده کن.
@@ -731,7 +986,12 @@ export default function Home() {
             {error}
           </div>
         )}
-        {isListening && !error && (
+        {isListening && !error && volume < 0.1 && (
+          <div style={{ textAlign: "center", color: "#f5a623", fontSize: 12, fontFamily: "'Vazirmatn', sans-serif" }}>
+            صدایی شنیده نمیشه - میکروفون رو چک کنید
+          </div>
+        )}
+        {isListening && !error && volume > 0.1 && (
           <div
             style={{
               textAlign: "center",
@@ -739,20 +999,14 @@ export default function Home() {
               fontFamily: "'Courier Prime', monospace",
               color: "rgba(255,64,129,0.7)",
               letterSpacing: 2,
-              animation: "blink 1.5s ease-in-out infinite",
             }}
           >
-            ● LISTENING
+            ● LISTENING {volume > 0.5 ? "●" : ""} {volume > 0.8 ? "●" : ""}
           </div>
         )}
-
-        <style>{`
-          @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50%       { opacity: 0.3; }
-          }
-        `}</style>
       </main>
+      
+      <AudioVisualizer stream={audioStream} isListening={isListening} />
     </>
   );
 }
