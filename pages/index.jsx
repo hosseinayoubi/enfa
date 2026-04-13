@@ -3,17 +3,30 @@ import Head from "next/head";
 
 // ── Wave bars animation ─────────────────────────────────────────────
 function WaveBars({ active, color }) {
+  const [heights, setHeights] = useState([4, 4, 4, 4, 4]);
+
+  useEffect(() => {
+    if (!active) {
+      setHeights([4, 4, 4, 4, 4]);
+      return;
+    }
+    const interval = setInterval(() => {
+      setHeights([...Array(5)].map(() => 4 + Math.random() * 14));
+    }, 150);
+    return () => clearInterval(interval);
+  }, [active]);
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 2, height: 20 }}>
-      {[...Array(5)].map((_, i) => (
+      {heights.map((h, i) => (
         <div
           key={i}
           style={{
             width: 3,
             borderRadius: 1.5,
             background: color,
-            height: active ? `${6 + Math.random() * 10}px` : "4px",
-            transition: "height 0.15s ease",
+            height: `${h}px`,
+            transition: "height 0.12s ease",
             opacity: active ? 1 : 0.3,
           }}
         />
@@ -47,6 +60,7 @@ function MicButton({ isListening, onClick, disabled }) {
         transform: isListening ? "scale(1.05)" : "scale(1)",
         animation: isListening ? "pulse 1.5s infinite" : "none",
         touchAction: "manipulation",
+        flexShrink: 0,
       }}
     >
       {isListening ? (
@@ -85,7 +99,7 @@ function Panel({ title, sentences, interim, isActive, side, isTranslation }) {
     <div
       style={{
         flex: 1,
-        minWidth: 0, // Critical for mobile
+        minWidth: 0,
         display: "flex",
         flexDirection: "column",
         background: "linear-gradient(160deg, #0f0f1e 0%, #0a0a16 100%)",
@@ -103,6 +117,7 @@ function Panel({ title, sentences, interim, isActive, side, isTranslation }) {
           alignItems: "center",
           justifyContent: "space-between",
           background: "rgba(0,0,0,0.2)",
+          flexShrink: 0,
         }}
       >
         <span
@@ -219,6 +234,15 @@ export default function Home() {
   const listeningRef = useRef(false);
   const restartTimerRef = useRef(null);
 
+  // ✅ FIX 1: ref برای micLang — همیشه آخرین زبان رو داره
+  const micLangRef = useRef(micLang);
+  useEffect(() => {
+    micLangRef.current = micLang;
+  }, [micLang]);
+
+  // ✅ FIX 2: ref برای start — closure stale رو حل می‌کنه
+  const startRef = useRef(null);
+
   // Translate function
   const translate = useCallback(async (id, text) => {
     setSentences((prev) => prev.map((s) => (s.id === id ? { ...s, translating: true } : s)));
@@ -230,7 +254,15 @@ export default function Home() {
       });
       if (!res.ok) throw new Error("API error");
       const data = await res.json();
+
+      // ✅ FIX 3: زبان شناسایی‌شده رو به micLang فیدبک بده
+      // تا recognition بعدی با زبان درست کار کنه
+      if (data.detected && data.detected !== micLangRef.current) {
+        micLangRef.current = data.detected;
+        setMicLang(data.detected);
+      }
       setDetectedLang(data.detected);
+
       setSentences((prev) =>
         prev.map((s) => (s.id === id ? { ...s, translation: data.translation, translating: false } : s))
       );
@@ -260,7 +292,9 @@ export default function Home() {
     const rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
-    rec.lang = micLang === "fa" ? "fa-IR" : "en-US";
+
+    // ✅ FIX 4: از ref بخون نه state — همیشه آخرین زبان رو داره
+    rec.lang = micLangRef.current === "fa" ? "fa-IR" : "en-US";
 
     rec.onresult = (e) => {
       let tmpInterim = "";
@@ -282,7 +316,6 @@ export default function Home() {
     };
 
     rec.onerror = (e) => {
-      // Ignore no-speech (silence is normal)
       if (e.error === "no-speech" || e.error === "aborted") return;
       if (e.error === "not-allowed") {
         setError("اجازه دسترسی به میکروفون داده نشد");
@@ -294,10 +327,10 @@ export default function Home() {
     };
 
     rec.onend = () => {
-      // Auto-restart immediately if still listening
+      // ✅ FIX 5: از startRef استفاده کن — نه closure قدیمی start
       if (listeningRef.current) {
         restartTimerRef.current = setTimeout(() => {
-          if (listeningRef.current) start();
+          if (listeningRef.current) startRef.current?.();
         }, 50);
       }
     };
@@ -307,14 +340,18 @@ export default function Home() {
       rec.start();
     } catch (err) {
       console.error("Start failed:", err);
-      setTimeout(() => start(), 100);
+      setTimeout(() => startRef.current?.(), 100);
     }
-  }, [micLang, translate]);
+  }, [translate]);
+
+  // ✅ همیشه startRef رو آپدیت نگه‌دار
+  useEffect(() => {
+    startRef.current = start;
+  }, [start]);
 
   // Toggle listening
   const toggle = useCallback(() => {
     if (listeningRef.current) {
-      // Stop
       listeningRef.current = false;
       clearTimeout(restartTimerRef.current);
       try {
@@ -323,7 +360,6 @@ export default function Home() {
       setIsListening(false);
       setInterim("");
     } else {
-      // Start fresh
       setSentences([]);
       setDetectedLang(null);
       setError("");
@@ -356,7 +392,7 @@ export default function Home() {
 
       <main
         style={{
-          height: "100vh",
+          height: "100dvh",
           display: "flex",
           flexDirection: "column",
           padding: 12,
@@ -389,8 +425,11 @@ export default function Home() {
             {["fa", "en"].map((l) => (
               <button
                 key={l}
-                onClick={() => !isListening && setMicLang(l)}
-                disabled={isListening}
+                onClick={() => {
+                  // ✅ اجازه تغییر زبان حتی حین listening — برای override دستی
+                  micLangRef.current = l;
+                  setMicLang(l);
+                }}
                 style={{
                   padding: "4px 10px",
                   borderRadius: 6,
@@ -399,7 +438,7 @@ export default function Home() {
                   color: micLang === l ? (l === "fa" ? "#f5a623" : "#00d4ff") : "rgba(255,255,255,0.4)",
                   fontSize: 12,
                   fontWeight: "bold",
-                  cursor: isListening ? "not-allowed" : "pointer",
+                  cursor: "pointer",
                   fontFamily: l === "fa" ? "Tahoma, sans-serif" : "monospace",
                 }}
               >
@@ -409,17 +448,52 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Panels - Horizontal layout (flex row) for both desktop and mobile */}
-        <div style={{ flex: 1, display: "flex", gap: 8, minHeight: 0, flexDirection: "row" }}>
+        {/* ✅ Panels — همیشه افقی (row) روی هر دستگاهی */}
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "row",   /* ← ثابت، هیچ‌وقت column نمی‌شه */
+            gap: 8,
+            minHeight: 0,
+            overflow: "hidden",
+          }}
+        >
           {isPersianInput ? (
             <>
-              <Panel title="ENGLISH" sentences={sentences} isActive={sentences.some((s) => s.translating)} side="left" isTranslation={true} />
-              <Panel title="فارسی" sentences={sentences} interim={interim} isActive={isListening} side="right" isTranslation={false} />
+              <Panel
+                title="ENGLISH"
+                sentences={sentences}
+                isActive={sentences.some((s) => s.translating)}
+                side="left"
+                isTranslation={true}
+              />
+              <Panel
+                title="فارسی"
+                sentences={sentences}
+                interim={interim}
+                isActive={isListening}
+                side="right"
+                isTranslation={false}
+              />
             </>
           ) : (
             <>
-              <Panel title="ENGLISH" sentences={sentences} interim={interim} isActive={isListening} side="left" isTranslation={false} />
-              <Panel title="فارسی" sentences={sentences} isActive={sentences.some((s) => s.translating)} side="right" isTranslation={true} />
+              <Panel
+                title="ENGLISH"
+                sentences={sentences}
+                interim={interim}
+                isActive={isListening}
+                side="left"
+                isTranslation={false}
+              />
+              <Panel
+                title="فارسی"
+                sentences={sentences}
+                isActive={sentences.some((s) => s.translating)}
+                side="right"
+                isTranslation={true}
+              />
             </>
           )}
         </div>
@@ -476,9 +550,19 @@ export default function Home() {
             مرورگر شما Speech Recognition را پشتیبانی نمی‌کند
           </div>
         )}
-        {error && <div style={{ textAlign: "center", color: "#ff6b6b", fontSize: 12, paddingBottom: 8 }}>{error}</div>}
+        {error && (
+          <div style={{ textAlign: "center", color: "#ff6b6b", fontSize: 12, paddingBottom: 8 }}>{error}</div>
+        )}
         {isListening && !error && (
-          <div style={{ textAlign: "center", color: "#ff4081", fontSize: 11, paddingBottom: 8, fontFamily: "monospace" }}>
+          <div
+            style={{
+              textAlign: "center",
+              color: "#ff4081",
+              fontSize: 11,
+              paddingBottom: 8,
+              fontFamily: "monospace",
+            }}
+          >
             ● LISTENING
           </div>
         )}
