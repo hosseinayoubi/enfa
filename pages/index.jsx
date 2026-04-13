@@ -1,581 +1,227 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Head from "next/head";
 
-// ── Audio Visualizer Component ─────────────────────────────────────────────
-function AudioVisualizer({ stream, isListening }) {
-  const canvasRef = useRef(null);
-  const animationRef = useRef(null);
-  const analyserRef = useRef(null);
-
-  useEffect(() => {
-    if (!stream || !isListening) return;
-    
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.8;
-    
-    const source = audioCtx.createMediaStreamSource(stream);
-    source.connect(analyser);
-    analyserRef.current = analyser;
-    
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    
-    const draw = () => {
-      if (!isListening) return;
-      animationRef.current = requestAnimationFrame(draw);
-      
-      analyser.getByteFrequencyData(dataArray);
-      ctx.fillStyle = "#0f0f1e";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      const barWidth = (canvas.width / bufferLength) * 2.5;
-      let barHeight;
-      let x = 0;
-      
-      for (let i = 0; i < bufferLength; i++) {
-        barHeight = (dataArray[i] / 255) * canvas.height;
-        const r = barHeight + 25;
-        const g = 250 * (i / bufferLength);
-        const b = 50;
-        
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-        x += barWidth + 1;
-      }
-    };
-    
-    draw();
-    
-    return () => {
-      cancelAnimationFrame(animationRef.current);
-      audioCtx.close();
-    };
-  }, [stream, isListening]);
-
-  if (!isListening) return null;
-  
-  return (
-    <canvas 
-      ref={canvasRef} 
-      width={300} 
-      height={60} 
-      style={{
-        position: "fixed",
-        bottom: 100,
-        left: "50%",
-        transform: "translateX(-50%)",
-        borderRadius: 8,
-        opacity: 0.8,
-        zIndex: 100
-      }}
-    />
-  );
-}
-
-// ── Wave bars animation component ──────────────────────────────────────────
+// ── Wave bars animation ─────────────────────────────────────────────
 function WaveBars({ active, color }) {
-  const bars = Array.from({ length: 9 });
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 3, height: 36 }}>
-      {bars.map((_, i) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 2, height: 20 }}>
+      {[...Array(5)].map((_, i) => (
         <div
           key={i}
           style={{
             width: 3,
-            borderRadius: 2,
+            borderRadius: 1.5,
             background: color,
-            height: active ? `${14 + Math.sin(i * 0.8) * 12}px` : "6px",
-            transition: `height ${0.18 + i * 0.02}s ease`,
-            animation: active
-              ? `wave ${0.6 + (i % 3) * 0.15}s ease-in-out ${i * 0.07}s infinite alternate`
-              : "none",
-            opacity: active ? 1 : 0.25,
+            height: active ? `${6 + Math.random() * 10}px` : "4px",
+            transition: "height 0.15s ease",
+            opacity: active ? 1 : 0.3,
           }}
         />
       ))}
-      <style>{`
-        @keyframes wave {
-          from { height: 6px; }
-          to   { height: 32px; }
-        }
-      `}</style>
     </div>
   );
 }
 
-// ── Language Badge ──────────────────────────────────────────────────────────
-function LangBadge({ lang, confidence }) {
-  const map = {
-    fa: { label: "فارسی", color: "#f5a623" },
-    en: { label: "English", color: "#00d4ff" },
-  };
-  if (!lang) return null;
-  const { label, color } = map[lang] || {};
+// ── Mic Button ──────────────────────────────────────────────────────
+function MicButton({ isListening, onClick, disabled }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-      <span
-        style={{
-          fontSize: 11,
-          fontFamily: "'Courier Prime', monospace",
-          letterSpacing: 1,
-          padding: "2px 9px",
-          borderRadius: 20,
-          border: `1px solid ${color}55`,
-          color,
-          background: `${color}15`,
-          textTransform: "uppercase",
-        }}
-      >
-        {label}
-      </span>
-      {confidence && (
-        <span style={{ fontSize: 9, color: `${color}88` }}>
-          {Math.round(confidence * 100)}%
-        </span>
-      )}
-    </div>
-  );
-}
-
-// ── Mic Button ──────────────────────────────────────────────────────────────
-function MicButton({ isListening, onClick, disabled, volume }) {
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        onClick={onClick}
-        disabled={disabled}
-        style={{
-          position: "relative",
-          width: 80,
-          height: 80,
-          borderRadius: "50%",
-          border: "none",
-          cursor: disabled ? "not-allowed" : "pointer",
-          background: isListening
-            ? "radial-gradient(circle, #ff4081, #c2185b)"
-            : "radial-gradient(circle, #1e1e35, #141428)",
-          boxShadow: isListening
-            ? `0 0 0 0 rgba(255,64,129,0.5), 0 0 ${30 + (volume || 0) * 20}px rgba(255,64,129,0.${6 + (volume || 0) * 4})`
-            : "0 0 0 0 transparent, 0 4px 20px rgba(0,0,0,0.6)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          transition: "all 0.1s ease",
-          transform: isListening ? `scale(${1 + (volume || 0) * 0.2})` : "scale(1)",
-          animation: isListening ? "pulse-ring 1.4s ease-out infinite" : "none",
-          outline: "none",
-          flexShrink: 0,
-        }}
-        aria-label={isListening ? "Stop" : "Start listening"}
-      >
-        {isListening ? (
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
-            <rect x="6" y="6" width="12" height="12" rx="2" />
-          </svg>
-        ) : (
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
-            <path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z" />
-            <path
-              d="M19 11a7 7 0 0 1-14 0"
-              stroke="white"
-              strokeWidth="2"
-              fill="none"
-              strokeLinecap="round"
-            />
-            <line x1="12" y1="19" x2="12" y2="23" stroke="white" strokeWidth="2" strokeLinecap="round" />
-            <line x1="9" y1="23" x2="15" y2="23" stroke="white" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-        )}
-      </button>
-      <style>{`
-        @keyframes pulse-ring {
-          0%   { box-shadow: 0 0 0 0 rgba(255,64,129,0.5), 0 0 30px rgba(255,64,129,0.4); }
-          70%  { box-shadow: 0 0 0 22px rgba(255,64,129,0), 0 0 30px rgba(255,64,129,0.4); }
-          100% { box-shadow: 0 0 0 0 rgba(255,64,129,0), 0 0 30px rgba(255,64,129,0.4); }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-// ── Text Panel ──────────────────────────────────────────────────────────────
-function TextPanel({ title, sentences, interimText, isActive, side, confidence }) {
-  const isPersian = side === "right";
-  const borderColor = side === "right" ? "#f5a623" : "#00d4ff";
-  const scrollRef = useRef(null);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [sentences, interimText]);
-
-  const hasContent = sentences.length > 0 || interimText;
-
-  return (
-    <div
+    <button
+      onClick={onClick}
+      disabled={disabled}
       style={{
-        flex: 1,
+        width: 70,
+        height: 70,
+        borderRadius: "50%",
+        border: "none",
+        cursor: disabled ? "not-allowed" : "pointer",
+        background: isListening
+          ? "radial-gradient(circle, #ff4081, #c2185b)"
+          : "radial-gradient(circle, #2a2a40, #1a1a30)",
+        boxShadow: isListening
+          ? "0 0 20px rgba(255,64,129,0.5)"
+          : "0 4px 15px rgba(0,0,0,0.4)",
         display: "flex",
-        flexDirection: "column",
-        background: "linear-gradient(160deg, #0f0f1e 0%, #0a0a16 100%)",
-        border: `1px solid ${isActive ? borderColor + "55" : "rgba(255,255,255,0.07)"}`,
-        borderRadius: 18,
-        overflow: "hidden",
-        transition: "border-color 0.4s ease, box-shadow 0.4s ease",
-        boxShadow: isActive
-          ? `0 0 40px ${side === "right" ? "rgba(245,166,35,0.12)" : "rgba(0,212,255,0.1)"}, inset 0 0 30px ${side === "right" ? "rgba(245,166,35,0.12)" : "rgba(0,212,255,0.1)"}`
-          : "0 4px 30px rgba(0,0,0,0.4)",
-        direction: isPersian ? "rtl" : "ltr",
+        alignItems: "center",
+        justifyContent: "center",
+        transition: "all 0.2s",
+        transform: isListening ? "scale(1.05)" : "scale(1)",
+        animation: isListening ? "pulse 1.5s infinite" : "none",
+        touchAction: "manipulation",
       }}
     >
-      <div
-        style={{
-          padding: "14px 20px",
-          borderBottom: "1px solid rgba(255,255,255,0.05)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span
-            style={{
-              fontSize: 11,
-              fontFamily: "'Courier Prime', monospace",
-              letterSpacing: 2,
-              color: isActive ? borderColor : "rgba(255,255,255,0.25)",
-              textTransform: "uppercase",
-              transition: "color 0.3s",
-            }}
-          >
-            {title}
-          </span>
-          {confidence > 0 && (
-            <span style={{ fontSize: 10, color: `${borderColor}88`, fontFamily: "monospace" }}>
-              {(confidence * 100).toFixed(0)}%
-            </span>
-          )}
-        </div>
-        <WaveBars active={isActive} color={borderColor} />
-      </div>
-
-      <div
-        ref={scrollRef}
-        style={{
-          flex: 1,
-          padding: "20px 22px",
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          justifyContent: hasContent ? "flex-start" : "center",
-          alignItems: hasContent ? "stretch" : "center",
-        }}
-      >
-        {!hasContent ? (
-          <p
-            style={{
-              color: "rgba(255,255,255,0.12)",
-              fontSize: 13,
-              fontFamily: isPersian ? "'Vazirmatn', sans-serif" : "'Courier Prime', monospace",
-              letterSpacing: isPersian ? 0 : 1,
-              textAlign: "center",
-            }}
-          >
-            {isPersian ? "اینجا نشون داده میشه..." : "will appear here..."}
-          </p>
-        ) : (
-          <>
-            {sentences.map((s, idx) => {
-              const isLast = idx === sentences.length - 1;
-              return (
-                <div
-                  key={s.id}
-                  style={{
-                    padding: "10px 14px",
-                    borderRadius: 10,
-                    background: isLast ? `${borderColor}0d` : "transparent",
-                    borderLeft: isPersian ? "none" : `2px solid ${isLast ? borderColor + "55" : "rgba(255,255,255,0.06)"}`,
-                    borderRight: isPersian ? `2px solid ${isLast ? borderColor + "55" : "rgba(255,255,255,0.06)"}` : "none",
-                    transition: "background 0.3s",
-                    opacity: s.isFinal ? 1 : 0.7,
-                  }}
-                >
-                  <p
-                    style={{
-                      fontFamily: isPersian ? "'Vazirmatn', sans-serif" : "'Courier Prime', monospace",
-                      fontSize: isPersian ? 17 : 15,
-                      lineHeight: 1.8,
-                      color: isLast ? "rgba(240,240,245,0.95)" : "rgba(240,240,245,0.5)",
-                      letterSpacing: isPersian ? 0 : 0.3,
-                      wordSpacing: isPersian ? 4 : 0,
-                      margin: 0,
-                      transition: "color 0.4s",
-                    }}
-                  >
-                    {s.text}
-                  </p>
-                  {s.confidence && s.confidence < 0.8 && (
-                    <span style={{ fontSize: 10, color: "#ff6b6b", marginTop: 4, display: "block" }}>
-                      دقت پایین - نزدیک‌تر صحبت کنید
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-
-            {interimText && (
-              <div
-                style={{
-                  padding: "10px 14px",
-                  borderLeft: isPersian ? "none" : `2px solid ${borderColor}33`,
-                  borderRight: isPersian ? `2px solid ${borderColor}33` : "none",
-                  animation: "pulse 1s ease-in-out infinite",
-                }}
-              >
-                <p
-                  style={{
-                    fontFamily: isPersian ? "'Vazirmatn', sans-serif" : "'Courier Prime', monospace",
-                    fontSize: isPersian ? 17 : 15,
-                    lineHeight: 1.8,
-                    color: `${borderColor}66`,
-                    fontStyle: "italic",
-                    margin: 0,
-                  }}
-                >
-                  {interimText}
-                </p>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      {isListening ? (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+          <rect x="6" y="6" width="12" height="12" rx="2" />
+        </svg>
+      ) : (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+        </svg>
+      )}
       <style>{`
         @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255,64,129,0.4); }
+          50% { box-shadow: 0 0 0 12px rgba(255,64,129,0); }
         }
       `}</style>
-    </div>
+    </button>
   );
 }
 
-// ── Translation Panel ───────────────────────────────────────────────────────
-function TranslationPanel({ title, sentences, isActive, side }) {
+// ── Panel Component ─────────────────────────────────────────────────
+function Panel({ title, sentences, interim, isActive, side, isTranslation }) {
   const isPersian = side === "right";
-  const borderColor = side === "right" ? "#f5a623" : "#00d4ff";
+  const color = side === "right" ? "#f5a623" : "#00d4ff";
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [sentences]);
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [sentences, interim]);
 
-  const hasContent = sentences.some((s) => s.translation || s.translating);
+  const hasContent = sentences.length > 0 || interim;
 
   return (
     <div
       style={{
         flex: 1,
+        minWidth: 0, // Critical for mobile
         display: "flex",
         flexDirection: "column",
         background: "linear-gradient(160deg, #0f0f1e 0%, #0a0a16 100%)",
-        border: `1px solid ${isActive ? borderColor + "55" : "rgba(255,255,255,0.07)"}`,
-        borderRadius: 18,
+        border: `1px solid ${isActive ? color + "60" : "rgba(255,255,255,0.08)"}`,
+        borderRadius: 12,
         overflow: "hidden",
-        transition: "border-color 0.4s ease, box-shadow 0.4s ease",
-        boxShadow: isActive
-          ? `0 0 40px ${side === "right" ? "rgba(245,166,35,0.12)" : "rgba(0,212,255,0.1)"}, inset 0 0 30px ${side === "right" ? "rgba(245,166,35,0.12)" : "rgba(0,212,255,0.1)"}`
-          : "0 4px 30px rgba(0,0,0,0.4)",
         direction: isPersian ? "rtl" : "ltr",
       }}
     >
       <div
         style={{
-          padding: "14px 20px",
+          padding: "10px 12px",
           borderBottom: "1px solid rgba(255,255,255,0.05)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          background: "rgba(0,0,0,0.2)",
         }}
       >
         <span
           style={{
             fontSize: 11,
-            fontFamily: "'Courier Prime', monospace",
-            letterSpacing: 2,
-            color: isActive ? borderColor : "rgba(255,255,255,0.25)",
-            textTransform: "uppercase",
-            transition: "color 0.3s",
+            fontFamily: "monospace",
+            letterSpacing: 1,
+            color: isActive ? color : "rgba(255,255,255,0.3)",
+            fontWeight: "bold",
           }}
         >
           {title}
         </span>
-        <WaveBars active={isActive} color={borderColor} />
+        <WaveBars active={isActive} color={color} />
       </div>
 
       <div
         ref={scrollRef}
         style={{
           flex: 1,
-          padding: "20px 22px",
+          padding: 12,
           overflowY: "auto",
           display: "flex",
           flexDirection: "column",
-          gap: 8,
+          gap: 6,
           justifyContent: hasContent ? "flex-start" : "center",
-          alignItems: hasContent ? "stretch" : "center",
         }}
       >
-        {!hasContent ? (
+        {!hasContent && (
           <p
             style={{
-              color: "rgba(255,255,255,0.12)",
-              fontSize: 13,
-              fontFamily: isPersian ? "'Vazirmatn', sans-serif" : "'Courier Prime', monospace",
-              letterSpacing: isPersian ? 0 : 1,
+              color: "rgba(255,255,255,0.15)",
+              fontSize: 12,
               textAlign: "center",
+              fontFamily: isPersian ? "Tahoma, sans-serif" : "monospace",
             }}
           >
-            {isPersian ? "ترجمه اینجا میاد..." : "translation appears here..."}
+            {isPersian ? "در انتظار..." : "Waiting..."}
           </p>
-        ) : (
-          sentences.map((s, idx) => {
-            const isLast = idx === sentences.length - 1;
-            return (
-              <div
-                key={s.id}
-                style={{
-                  padding: "10px 14px",
-                  borderRadius: 10,
-                  background: isLast ? `${borderColor}0d` : "transparent",
-                  borderLeft: isPersian ? "none" : `2px solid ${isLast ? borderColor + "55" : "rgba(255,255,255,0.06)"}`,
-                  borderRight: isPersian ? `2px solid ${isLast ? borderColor + "55" : "rgba(255,255,255,0.06)"}` : "none",
-                  transition: "background 0.3s",
-                }}
-              >
-                {s.translating ? (
-                  <p
-                    style={{
-                      fontSize: 18,
-                      color: `${borderColor}44`,
-                      fontFamily: "'Courier Prime', monospace",
-                      animation: "blink 0.9s ease-in-out infinite",
-                      margin: 0,
-                      letterSpacing: 4,
-                    }}
-                  >
-                    · · ·
-                  </p>
-                ) : s.translation ? (
-                  <p
-                    style={{
-                      fontFamily: isPersian ? "'Vazirmatn', sans-serif" : "'Courier Prime', monospace",
-                      fontSize: isPersian ? 17 : 15,
-                      lineHeight: 1.8,
-                      color: isLast ? "rgba(240,240,245,0.95)" : "rgba(240,240,245,0.5)",
-                      letterSpacing: isPersian ? 0 : 0.3,
-                      wordSpacing: isPersian ? 4 : 0,
-                      margin: 0,
-                      transition: "color 0.4s",
-                    }}
-                  >
-                    {s.translation}
-                  </p>
-                ) : null}
-              </div>
-            );
-          })
+        )}
+
+        {sentences.map((s, idx) => {
+          const isLast = idx === sentences.length - 1;
+          const text = isTranslation ? s.translation : s.text;
+          if (isTranslation && !s.translation && !s.translating) return null;
+
+          return (
+            <div
+              key={s.id}
+              style={{
+                padding: "8px 10px",
+                borderRadius: 8,
+                background: isLast ? color + "15" : "transparent",
+                borderLeft: isPersian ? "none" : `2px solid ${isLast ? color : "transparent"}`,
+                borderRight: isPersian ? `2px solid ${isLast ? color : "transparent"}` : "none",
+                animation: s.translating ? "fadeIn 0.3s" : "none",
+              }}
+            >
+              {s.translating ? (
+                <span style={{ color: color + "60", fontFamily: "monospace", letterSpacing: 2 }}>• • •</span>
+              ) : (
+                <p
+                  style={{
+                    fontFamily: isPersian ? "Tahoma, sans-serif" : "monospace",
+                    fontSize: 14,
+                    lineHeight: 1.6,
+                    color: isLast ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.6)",
+                    margin: 0,
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {text}
+                </p>
+              )}
+            </div>
+          );
+        })}
+
+        {interim && (
+          <div style={{ padding: "8px 10px", opacity: 0.7 }}>
+            <p
+              style={{
+                fontFamily: isPersian ? "Tahoma, sans-serif" : "monospace",
+                fontSize: 14,
+                lineHeight: 1.6,
+                color: color,
+                margin: 0,
+                fontStyle: "italic",
+              }}
+            >
+              {interim}
+            </p>
+          </div>
         )}
       </div>
+      <style>{`
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
     </div>
   );
 }
 
-// ── Main App ────────────────────────────────────────────────────────────────
+// ── Main App ────────────────────────────────────────────────────────
 export default function Home() {
   const [isListening, setIsListening] = useState(false);
   const [micLang, setMicLang] = useState("fa");
   const [detectedLang, setDetectedLang] = useState(null);
   const [supported, setSupported] = useState(true);
   const [error, setError] = useState("");
-  const [interimTranscript, setInterimTranscript] = useState("");
-  const [audioStream, setAudioStream] = useState(null);
-  const [volume, setVolume] = useState(0);
-  const [avgConfidence, setAvgConfidence] = useState(0);
-
+  const [interim, setInterim] = useState("");
   const [sentences, setSentences] = useState([]);
 
-  const recognitionRef = useRef(null);
-  const isListeningRef = useRef(false);
-  const idCounterRef = useRef(0);
-  const restartTimeoutRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
-  const volumeIntervalRef = useRef(null);
+  const recRef = useRef(null);
+  const listeningRef = useRef(false);
+  const restartTimerRef = useRef(null);
 
-  // ── Volume Monitor ───────────────────────────────────────────────────────
-  const startVolumeMonitor = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: 44100
-        } 
-      });
-      setAudioStream(stream);
-      
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 32;
-      
-      const source = audioCtx.createMediaStreamSource(stream);
-      source.connect(analyser);
-      
-      audioContextRef.current = audioCtx;
-      analyserRef.current = analyser;
-      
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      
-      volumeIntervalRef.current = setInterval(() => {
-        analyser.getByteFrequencyData(dataArray);
-        const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-        const normalized = Math.min(average / 128, 1);
-        setVolume(normalized);
-      }, 100);
-      
-    } catch (err) {
-      console.error("Audio access error:", err);
-    }
-  }, []);
-
-  const stopVolumeMonitor = useCallback(() => {
-    if (volumeIntervalRef.current) {
-      clearInterval(volumeIntervalRef.current);
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-    }
-    if (audioStream) {
-      audioStream.getTracks().forEach(track => track.stop());
-    }
-    setAudioStream(null);
-    setVolume(0);
-  }, [audioStream]);
-
-  // ── Translate ─────────────────────────────────────────────────────────────
-  const translateSentence = useCallback(async (id, text) => {
-    setSentences((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, translating: true } : s))
-    );
+  // Translate function
+  const translate = useCallback(async (id, text) => {
+    setSentences((prev) => prev.map((s) => (s.id === id ? { ...s, translating: true } : s)));
     try {
       const res = await fetch("/api/translate", {
         method: "POST",
@@ -586,21 +232,17 @@ export default function Home() {
       const data = await res.json();
       setDetectedLang(data.detected);
       setSentences((prev) =>
-        prev.map((s) =>
-          s.id === id ? { ...s, translation: data.translation, translating: false } : s
-        )
+        prev.map((s) => (s.id === id ? { ...s, translation: data.translation, translating: false } : s))
       );
     } catch (e) {
-      setError("ترجمه ناموفق بود. API key رو چک کن.");
-      setSentences((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, translating: false } : s))
-      );
+      setError("خطا در ترجمه");
+      setSentences((prev) => prev.map((s) => (s.id === id ? { ...s, translating: false } : s)));
     }
   }, []);
 
-  // ── Create Recognition ───────────────────────────────────────────────────
-  const createAndStart = useCallback(() => {
-    if (!isListeningRef.current) return;
+  // Start recognition
+  const start = useCallback(() => {
+    if (!listeningRef.current) return;
 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
@@ -609,179 +251,107 @@ export default function Home() {
     }
 
     // Cleanup old
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
-      recognitionRef.current = null;
+    if (recRef.current) {
+      try {
+        recRef.current.stop();
+      } catch {}
     }
 
     const rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
-    rec.maxAlternatives = 1;
     rec.lang = micLang === "fa" ? "fa-IR" : "en-US";
-    
-    // Chrome mobile optimization
-    if ('serviceURI' in rec) {
-      rec.serviceURI = 'https://www.google.com/speech-api/v2/recognize';
-    }
-
-    let lastResultTime = Date.now();
 
     rec.onresult = (e) => {
-      lastResultTime = Date.now();
-      let interim = "";
-      let finalConfidence = 0;
-      
+      let tmpInterim = "";
+
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const result = e.results[i];
-        const transcript = result[0].transcript.trim();
-        
         if (result.isFinal) {
-          finalConfidence = result[0].confidence || 0.9;
-          if (!transcript) continue;
-          
-          const newId = ++idCounterRef.current;
-          setSentences((prev) => [
-            ...prev,
-            { 
-              id: newId, 
-              text: transcript, 
-              original: transcript,
-              translation: null, 
-              translating: false,
-              confidence: finalConfidence,
-              isFinal: true
-            },
-          ]);
-          translateSentence(newId, transcript);
-          setInterimTranscript("");
+          const text = result[0].transcript.trim();
+          if (text) {
+            const id = Date.now() + Math.random();
+            setSentences((prev) => [...prev, { id, text, translation: null, translating: false }]);
+            translate(id, text);
+          }
         } else {
-          interim += transcript;
+          tmpInterim += result[0].transcript;
         }
       }
-      
-      setInterimTranscript(interim);
-      if (finalConfidence > 0) {
-        setAvgConfidence(finalConfidence);
-      }
+      setInterim(tmpInterim);
     };
 
     rec.onerror = (e) => {
-      console.error("Speech recognition error:", e.error, e.message);
-      
-      // Ignore non-critical errors
-      if (e.error === "no-speech") {
-        // No speech detected, continue listening
-        return;
-      }
-      if (e.error === "aborted") {
-        // User stopped or restarted
-        return;
-      }
-      
-      setError(`خطا: ${e.error} - ${e.message || ''}`);
-      
-      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-        isListeningRef.current = false;
+      // Ignore no-speech (silence is normal)
+      if (e.error === "no-speech" || e.error === "aborted") return;
+      if (e.error === "not-allowed") {
+        setError("اجازه دسترسی به میکروفون داده نشد");
+        listeningRef.current = false;
         setIsListening(false);
+        return;
       }
+      console.error("Speech error:", e.error);
     };
 
     rec.onend = () => {
-      const timeSinceLastResult = Date.now() - lastResultTime;
-      
-      // Immediate restart if still listening
-      if (isListeningRef.current) {
-        // Clear any existing timeout
-        if (restartTimeoutRef.current) {
-          clearTimeout(restartTimeoutRef.current);
-        }
-        
-        // Shorter delay if we just got results (more responsive)
-        const delay = timeSinceLastResult < 1000 ? 50 : 150;
-        
-        restartTimeoutRef.current = setTimeout(() => {
-          if (isListeningRef.current) {
-            createAndStart();
-          }
-        }, delay);
+      // Auto-restart immediately if still listening
+      if (listeningRef.current) {
+        restartTimerRef.current = setTimeout(() => {
+          if (listeningRef.current) start();
+        }, 50);
       }
     };
 
-    rec.onstart = () => {
-      console.log("Recognition started");
-      setError("");
-    };
-
-    recognitionRef.current = rec;
-    
+    recRef.current = rec;
     try {
       rec.start();
     } catch (err) {
-      console.error("Start error:", err);
-      // Retry once
-      setTimeout(() => {
-        if (isListeningRef.current) createAndStart();
-      }, 300);
+      console.error("Start failed:", err);
+      setTimeout(() => start(), 100);
     }
-  }, [micLang, translateSentence]);
+  }, [micLang, translate]);
 
-  // ── Toggle Listening ─────────────────────────────────────────────────────
-  const toggleListening = useCallback(async () => {
-    if (isListeningRef.current) {
+  // Toggle listening
+  const toggle = useCallback(() => {
+    if (listeningRef.current) {
       // Stop
-      isListeningRef.current = false;
-      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
-      
-      try { recognitionRef.current?.stop(); } catch {}
-      recognitionRef.current = null;
-      
-      stopVolumeMonitor();
+      listeningRef.current = false;
+      clearTimeout(restartTimerRef.current);
+      try {
+        recRef.current?.stop();
+      } catch {}
       setIsListening(false);
-      setInterimTranscript("");
-      setVolume(0);
+      setInterim("");
     } else {
-      // Start
+      // Start fresh
       setSentences([]);
       setDetectedLang(null);
       setError("");
-      setInterimTranscript("");
-      idCounterRef.current = 0;
-      isListeningRef.current = true;
+      setInterim("");
+      listeningRef.current = true;
       setIsListening(true);
-      
-      await startVolumeMonitor();
-      createAndStart();
+      start();
     }
-  }, [createAndStart, startVolumeMonitor, stopVolumeMonitor]);
+  }, [start]);
 
-  const clearAll = () => {
-    if (!isListeningRef.current) {
-      setSentences([]);
-      setDetectedLang(null);
-      setError("");
-      setInterimTranscript("");
-    }
-  };
-
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      isListeningRef.current = false;
-      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
-      recognitionRef.current?.stop();
-      stopVolumeMonitor();
+      listeningRef.current = false;
+      clearTimeout(restartTimerRef.current);
+      try {
+        recRef.current?.stop();
+      } catch {}
     };
-  }, [stopVolumeMonitor]);
+  }, []);
 
-  // Determine layout
-  const isOriginalPersian = detectedLang === "fa" || (!detectedLang && micLang === "fa");
+  const isPersianInput = detectedLang === "fa" || (!detectedLang && micLang === "fa");
 
   return (
     <>
       <Head>
-        <title>صدا ترجمه | Voice Translator</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="description" content="Real-time Persian ↔ English voice translator" />
+        <title>Voice Translator</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
       </Head>
 
       <main
@@ -789,125 +359,68 @@ export default function Home() {
           height: "100vh",
           display: "flex",
           flexDirection: "column",
-          padding: "24px 28px",
-          gap: 20,
-          background:
-            "radial-gradient(ellipse at 20% 0%, rgba(0,212,255,0.04) 0%, transparent 50%), radial-gradient(ellipse at 80% 100%, rgba(245,166,35,0.05) 0%, transparent 50%), #07070f",
+          padding: 12,
+          gap: 12,
+          background: "#07070f",
+          boxSizing: "border-box",
+          overflow: "hidden",
         }}
       >
         {/* Header */}
-        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <div>
-            <h1
-              style={{
-                fontSize: 22,
-                fontFamily: "'Syne', sans-serif",
-                fontWeight: 800,
-                letterSpacing: -0.5,
-                color: "#f0f0f5",
-                lineHeight: 1,
-              }}
-            >
-              VOICE TRANSLATE
+            <h1 style={{ fontSize: 18, fontWeight: "bold", color: "#fff", margin: 0, fontFamily: "sans-serif" }}>
+              TRANSLATOR
             </h1>
-            <p
-              style={{
-                fontSize: 11,
-                fontFamily: "'Courier Prime', monospace",
-                color: "rgba(255,255,255,0.3)",
-                letterSpacing: 2,
-                marginTop: 3,
-              }}
-            >
-              FA ↔ EN · REAL-TIME
+            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", margin: "2px 0 0 0", fontFamily: "monospace" }}>
+              FA ↔ EN
             </p>
           </div>
 
           <div
             style={{
               display: "flex",
-              alignItems: "center",
-              gap: 8,
-              background: "rgba(255,255,255,0.04)",
-              borderRadius: 10,
-              padding: "6px 8px",
-              border: "1px solid rgba(255,255,255,0.07)",
+              gap: 4,
+              background: "rgba(255,255,255,0.05)",
+              padding: 4,
+              borderRadius: 8,
             }}
           >
-            <span
-              style={{
-                fontSize: 11,
-                fontFamily: "'Courier Prime', monospace",
-                color: "rgba(255,255,255,0.35)",
-                letterSpacing: 1,
-              }}
-            >
-              MIC:
-            </span>
             {["fa", "en"].map((l) => (
               <button
                 key={l}
-                onClick={() => { if (!isListeningRef.current) setMicLang(l); }}
-                disabled={isListeningRef.current}
+                onClick={() => !isListening && setMicLang(l)}
+                disabled={isListening}
                 style={{
-                  padding: "4px 12px",
-                  borderRadius: 7,
+                  padding: "4px 10px",
+                  borderRadius: 6,
                   border: "none",
-                  cursor: isListeningRef.current ? "not-allowed" : "pointer",
-                  fontFamily: l === "fa" ? "'Vazirmatn', sans-serif" : "'Courier Prime', monospace",
+                  background: micLang === l ? (l === "fa" ? "#f5a62340" : "#00d4ff30") : "transparent",
+                  color: micLang === l ? (l === "fa" ? "#f5a623" : "#00d4ff") : "rgba(255,255,255,0.4)",
                   fontSize: 12,
-                  fontWeight: 600,
-                  letterSpacing: l === "en" ? 1 : 0,
-                  background: micLang === l ? (l === "fa" ? "#f5a62330" : "#00d4ff25") : "transparent",
-                  color: micLang === l ? (l === "fa" ? "#f5a623" : "#00d4ff") : "rgba(255,255,255,0.3)",
-                  transition: "all 0.2s",
-                  outline: "none",
+                  fontWeight: "bold",
+                  cursor: isListening ? "not-allowed" : "pointer",
+                  fontFamily: l === "fa" ? "Tahoma, sans-serif" : "monospace",
                 }}
               >
-                {l === "fa" ? "فارسی" : "EN"}
+                {l === "fa" ? "FA" : "EN"}
               </button>
             ))}
           </div>
         </header>
 
-        {/* Panels */}
-        <div style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
-          {/* Left Panel */}
-          {isOriginalPersian ? (
-            <TranslationPanel
-              title="ENGLISH"
-              side="left"
-              sentences={sentences}
-              isActive={sentences.some((s) => s.translating)}
-            />
+        {/* Panels - Horizontal layout (flex row) for both desktop and mobile */}
+        <div style={{ flex: 1, display: "flex", gap: 8, minHeight: 0, flexDirection: "row" }}>
+          {isPersianInput ? (
+            <>
+              <Panel title="ENGLISH" sentences={sentences} isActive={sentences.some((s) => s.translating)} side="left" isTranslation={true} />
+              <Panel title="فارسی" sentences={sentences} interim={interim} isActive={isListening} side="right" isTranslation={false} />
+            </>
           ) : (
-            <TextPanel
-              title="ENGLISH"
-              side="left"
-              sentences={sentences}
-              interimText={interimTranscript}
-              isActive={isListening}
-              confidence={avgConfidence}
-            />
-          )}
-
-          {/* Right Panel */}
-          {isOriginalPersian ? (
-            <TextPanel
-              title="فارسی"
-              side="right"
-              sentences={sentences}
-              interimText={interimTranscript}
-              isActive={isListening}
-              confidence={avgConfidence}
-            />
-          ) : (
-            <TranslationPanel
-              title="فارسی"
-              side="right"
-              sentences={sentences}
-              isActive={sentences.some((s) => s.translating)}
-            />
+            <>
+              <Panel title="ENGLISH" sentences={sentences} interim={interim} isActive={isListening} side="left" isTranslation={false} />
+              <Panel title="فارسی" sentences={sentences} isActive={sentences.some((s) => s.translating)} side="right" isTranslation={true} />
+            </>
           )}
         </div>
 
@@ -917,96 +430,59 @@ export default function Home() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            gap: 24,
-            paddingBottom: 4,
-            position: "relative",
+            gap: 16,
+            flexShrink: 0,
+            paddingBottom: 8,
           }}
         >
           <button
-            onClick={clearAll}
+            onClick={() => !isListening && setSentences([])}
             disabled={isListening}
             style={{
-              padding: "8px 18px",
-              borderRadius: 10,
+              padding: "6px 12px",
+              borderRadius: 8,
               border: "1px solid rgba(255,255,255,0.1)",
               background: "transparent",
-              color: "rgba(255,255,255,0.35)",
+              color: "rgba(255,255,255,0.4)",
+              fontSize: 11,
               cursor: isListening ? "not-allowed" : "pointer",
-              fontFamily: "'Courier Prime', monospace",
-              fontSize: 12,
-              letterSpacing: 1,
-              transition: "all 0.2s",
-              outline: "none",
+              fontFamily: "monospace",
             }}
           >
-            CLEAR
+            Clear
           </button>
 
-          <MicButton 
-            isListening={isListening} 
-            onClick={toggleListening} 
-            disabled={!supported}
-            volume={volume}
-          />
+          <MicButton isListening={isListening} onClick={toggle} disabled={!supported} />
 
-          <div style={{ minWidth: 80, display: "flex", justifyContent: "flex-start" }}>
-            {detectedLang && <LangBadge lang={detectedLang} confidence={avgConfidence} />}
+          <div style={{ minWidth: 40, textAlign: "center" }}>
+            {detectedLang && (
+              <span
+                style={{
+                  fontSize: 10,
+                  color: detectedLang === "fa" ? "#f5a623" : "#00d4ff",
+                  fontWeight: "bold",
+                  fontFamily: "monospace",
+                }}
+              >
+                {detectedLang === "fa" ? "FA" : "EN"}
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Volume indicator bar */}
-        {isListening && (
-          <div style={{ 
-            width: "100%", 
-            maxWidth: 300, 
-            margin: "0 auto", 
-            height: 4, 
-            background: "rgba(255,255,255,0.1)",
-            borderRadius: 2,
-            overflow: "hidden"
-          }}>
-            <div style={{
-              width: `${volume * 100}%`,
-              height: "100%",
-              background: `linear-gradient(90deg, #00d4ff, #ff4081)`,
-              transition: "width 0.1s ease",
-              borderRadius: 2
-            }} />
-          </div>
-        )}
-
         {/* Status */}
         {!supported && (
-          <div style={{ textAlign: "center", color: "#ff6b6b", fontSize: 13, fontFamily: "'Vazirmatn', sans-serif" }}>
-            مرورگرت Speech Recognition رو ساپورت نمیکنه. از Chrome استفاده کن.
+          <div style={{ textAlign: "center", color: "#ff6b6b", fontSize: 12, paddingBottom: 8 }}>
+            مرورگر شما Speech Recognition را پشتیبانی نمی‌کند
           </div>
         )}
-        {error && (
-          <div style={{ textAlign: "center", color: "#ff6b6b", fontSize: 12, fontFamily: "'Courier Prime', monospace", letterSpacing: 0.5 }}>
-            {error}
-          </div>
-        )}
-        {isListening && !error && volume < 0.1 && (
-          <div style={{ textAlign: "center", color: "#f5a623", fontSize: 12, fontFamily: "'Vazirmatn', sans-serif" }}>
-            صدایی شنیده نمیشه - میکروفون رو چک کنید
-          </div>
-        )}
-        {isListening && !error && volume > 0.1 && (
-          <div
-            style={{
-              textAlign: "center",
-              fontSize: 11,
-              fontFamily: "'Courier Prime', monospace",
-              color: "rgba(255,64,129,0.7)",
-              letterSpacing: 2,
-            }}
-          >
-            ● LISTENING {volume > 0.5 ? "●" : ""} {volume > 0.8 ? "●" : ""}
+        {error && <div style={{ textAlign: "center", color: "#ff6b6b", fontSize: 12, paddingBottom: 8 }}>{error}</div>}
+        {isListening && !error && (
+          <div style={{ textAlign: "center", color: "#ff4081", fontSize: 11, paddingBottom: 8, fontFamily: "monospace" }}>
+            ● LISTENING
           </div>
         )}
       </main>
-      
-      <AudioVisualizer stream={audioStream} isListening={isListening} />
     </>
   );
 }
