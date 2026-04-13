@@ -411,6 +411,7 @@ export default function Home() {
   const recognitionRef = useRef(null);
   const isListeningRef = useRef(false);
   const idCounterRef = useRef(0);
+  const restartRef = useRef(null); // always points to latest createAndStart fn
 
   // ── Translate a single sentence immediately ─────────────────────────────
   const translateSentence = useCallback(async (id, text) => {
@@ -439,28 +440,31 @@ export default function Home() {
     }
   }, []);
 
-  // ── Setup Speech Recognition ────────────────────────────────────────────
-  const setupRecognition = useCallback(() => {
+  // ── Create a fresh recognition instance and start it ───────────────────
+  // Called both on first start AND on every auto-restart after onend.
+  // Creating a NEW instance each time avoids Chrome's InvalidStateError
+  // when trying to re-start a recognition that already stopped.
+  const createAndStart = useCallback(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-      setSupported(false);
-      return null;
-    }
+    if (!SR) { setSupported(false); return; }
+    if (!isListeningRef.current) return; // user already stopped
 
-    const recognition = new SR();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = micLang === "fa" ? "fa-IR" : "en-US";
+    // Stop & discard old instance cleanly
+    try { recognitionRef.current?.stop(); } catch {}
+    recognitionRef.current = null;
 
-    recognition.onresult = (e) => {
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = micLang === "fa" ? "fa-IR" : "en-US";
+
+    rec.onresult = (e) => {
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const result = e.results[i];
         if (result.isFinal) {
           const finalText = result[0].transcript.trim();
           if (!finalText) continue;
-
-          // Add sentence to state and fire translation immediately
           const newId = ++idCounterRef.current;
           setSentences((prev) => [
             ...prev,
@@ -474,46 +478,59 @@ export default function Home() {
       setInterimTranscript(interim);
     };
 
-    recognition.onerror = (e) => {
-      if (e.error === "no-speech") return;
+    rec.onerror = (e) => {
+      // no-speech is normal Chrome behaviour during silence — ignore it
+      if (e.error === "no-speech" || e.error === "aborted") return;
       setError(`خطا: ${e.error}`);
       isListeningRef.current = false;
       setIsListening(false);
     };
 
-    recognition.onend = () => {
-      // Auto-restart to keep continuous listening
+    rec.onend = () => {
+      // Chrome can end the session for many reasons even with continuous=true.
+      // Wait 200 ms then call restartRef (always the latest createAndStart),
+      // which creates a BRAND NEW instance — avoids InvalidStateError.
       if (isListeningRef.current) {
-        try { recognition.start(); } catch {}
+        setTimeout(() => restartRef.current?.(), 200);
       }
     };
 
-    return recognition;
+    recognitionRef.current = rec;
+    try {
+      rec.start();
+    } catch (err) {
+      console.error("Recognition start failed:", err);
+      // retry once after a short delay
+      setTimeout(() => restartRef.current?.(), 500);
+    }
   }, [micLang, translateSentence]);
+
+  // Keep restartRef always pointing to the latest createAndStart
+  useEffect(() => {
+    restartRef.current = createAndStart;
+  }, [createAndStart]);
 
   // ── Toggle Listening ────────────────────────────────────────────────────
   const toggleListening = useCallback(() => {
     if (isListeningRef.current) {
+      // Stop
       isListeningRef.current = false;
-      recognitionRef.current?.stop();
+      try { recognitionRef.current?.stop(); } catch {}
       recognitionRef.current = null;
       setIsListening(false);
       setInterimTranscript("");
     } else {
+      // Start fresh
       setSentences([]);
       setDetectedLang(null);
       setError("");
       setInterimTranscript("");
       idCounterRef.current = 0;
-
-      const rec = setupRecognition();
-      if (!rec) return;
-      recognitionRef.current = rec;
       isListeningRef.current = true;
-      rec.start();
       setIsListening(true);
+      createAndStart();
     }
-  }, [setupRecognition]);
+  }, [createAndStart]);
 
   const clearAll = () => {
     if (!isListeningRef.current) {
