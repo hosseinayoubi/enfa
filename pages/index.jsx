@@ -1,178 +1,235 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 
-const RealTimeTranslator = () => {
-  const [isRecording, setIsRecording] = useState(false);
-  const [lang, setLang] = useState("fa-IR");
+export default function Home() {
+  const [isListening, setIsListening] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState("");
   const [sentences, setSentences] = useState([]);
-  const [interimText, setInterimText] = useState("");
-  const [error, setError] = useState(null);
+  const [liveTranslation, setLiveTranslation] = useState("");
 
   const recognitionRef = useRef(null);
-  const silenceTimerRef = useRef(null);
-  const scrollRef = useRef(null);
-  const langRef = useRef(lang);
+  const isListeningRef = useRef(false); // ✅ FIX: جلوی قطع شدن رو می‌گیره
+  const liveTimerRef = useRef(null);
+  const idCounterRef = useRef(0);
 
-  // اسکرول خودکار به آخرین جمله
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [sentences, interimText]);
-
-  // تابع ارسال به API با مدیریت خطا
-  const translateText = async (text, id) => {
+  // ترجمه نهایی جمله کامل
+  const translateSentence = async (id, text) => {
     try {
-      const response = await fetch("/api/translate", {
+      const res = await fetch("/api/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          text, 
-          sourceLang: langRef.current.split('-')[0] 
-        }),
+        body: JSON.stringify({ text }),
       });
-      
-      if (!response.ok) throw new Error("API Error");
-      const data = await response.json();
-      
-      setSentences(prev => prev.map(s => 
-        s.id === id ? { ...s, translation: data.translation, loading: false } : s
-      ));
-    } catch (err) {
-      setSentences(prev => prev.map(s => 
-        s.id === id ? { ...s, translation: "❌ خطا در ترجمه", loading: false } : s
-      ));
+      const data = await res.json();
+      setSentences((prev) =>
+        prev.map((s) =>
+          s.id === id ? { ...s, translation: data.translation } : s
+        )
+      );
+    } catch (e) {
+      console.error("translateSentence error:", e);
     }
   };
 
-  const processText = (text) => {
-    const cleanText = text.trim();
-    if (!cleanText || cleanText.length < 2) return;
+  // ترجمه زنده روی interim
+  const liveTranslate = useCallback(async (text) => {
+    try {
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setLiveTranslation(data.translation);
+    } catch (e) {
+      console.error("liveTranslate error:", e);
+    }
+  }, []);
 
-    const id = Math.random().toString(36).substr(2, 9);
-    setSentences(prev => [...prev, { id, text: cleanText, translation: "در حال ترجمه...", loading: true }]);
-    translateText(cleanText, id);
-  };
+  // debounce 300ms روی interim
+  const handleInterim = useCallback(
+    (text) => {
+      clearTimeout(liveTimerRef.current);
+      liveTimerRef.current = setTimeout(() => {
+        if (text.trim().length > 4) liveTranslate(text);
+      }, 300);
+    },
+    [liveTranslate]
+  );
 
-  const startSpeech = useCallback(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setError("مرورگر شما از SpeechRecognition پشتیبانی نمی‌کند.");
+  // ثبت جمله نهایی
+  const commitSentence = useCallback((text) => {
+    const clean = text.trim();
+    if (!clean) return;
+
+    clearTimeout(liveTimerRef.current);
+    setLiveTranslation("");
+    setInterimTranscript("");
+
+    const newId = ++idCounterRef.current;
+    setSentences((prev) => [
+      ...prev,
+      { id: newId, original: clean, translation: "..." },
+    ]);
+    translateSentence(newId, clean);
+  }, []);
+
+  const startListening = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      alert("Chrome لازمه (SpeechRecognition)");
       return;
     }
 
-    const rec = new SpeechRecognition();
-    rec.lang = langRef.current;
+    const rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
+    rec.lang = "fa-IR";
 
-    rec.onresult = (event) => {
+    rec.onresult = (e) => {
       let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          processText(transcript);
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const result = e.results[i];
+        if (result.isFinal) {
+          const finalText = result[0].transcript.trim();
+          if (finalText) commitSentence(finalText);
         } else {
-          interim += transcript;
+          interim += result[0].transcript;
         }
       }
-      setInterimText(interim);
-
-      // تایمر هوشمند سکوت: اگر ۵۰۰ میلی‌ثانیه حرف نزند، متن موقت را نهایی فرض کن
-      clearTimeout(silenceTimerRef.current);
-      if (interim.trim()) {
-        silenceTimerRef.current = setTimeout(() => {
-          processText(interim);
-          setInterimText("");
-        }, 500); 
+      if (interim) {
+        setInterimTranscript(interim);
+        handleInterim(interim); // real-time translation
       }
     };
 
-    rec.onend = () => {
-      if (isRecording) rec.start(); // راه اندازی مجدد برای پایداری
+    rec.onerror = (e) => {
+      if (e.error === "aborted") return;
+      console.error("SpeechRecognition error:", e.error);
     };
 
-    recognitionRef.current = rec;
-    rec.start();
-  }, [isRecording]);
+    // ✅ FIX: از ref استفاده می‌کنه نه state
+    // چون state داخل closure کهنه‌ست، ref همیشه لحظه‌ایه
+    rec.onend = () => {
+      if (isListeningRef.current) rec.start();
+    };
 
-  const toggleRecording = () => {
-    if (isRecording) {
-      recognitionRef.current?.stop();
-      setIsRecording(false);
-      setInterimText("");
-    } else {
-      setSentences([]);
-      setIsRecording(true);
-      setError(null);
-      startSpeech();
-    }
+    rec.start();
+    recognitionRef.current = rec;
+    isListeningRef.current = true; // ✅ اول ref
+    setIsListening(true);
+  };
+
+  const stopListening = () => {
+    isListeningRef.current = false; // ✅ اول ref — قبل از stop
+    setIsListening(false);
+    recognitionRef.current?.stop();
+    clearTimeout(liveTimerRef.current);
+    setInterimTranscript("");
+    setLiveTranslation("");
+  };
+
+  const clearAll = () => {
+    setSentences([]);
+    setInterimTranscript("");
+    setLiveTranslation("");
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-100 p-4 font-sans text-right" dir="rtl">
-      {/* Header */}
-      <div className="bg-white p-4 rounded-2xl shadow-sm mb-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <div className={`w-3 h-3 rounded-full ${isRecording ? 'bg-red-500 animate-ping' : 'bg-gray-300'}`} />
-          <h1 className="text-lg font-bold text-gray-700">مترجم زنده</h1>
-        </div>
-        
-        <div className="flex gap-2">
-          <select 
-            onChange={(e) => { setLang(e.target.value); langRef.current = e.target.value; }}
-            className="bg-gray-50 border-none text-sm p-2 rounded-lg outline-none"
-          >
-            <option value="fa-IR">فارسی ➔ English</option>
-            <option value="en-US">English ➔ فارسی</option>
-          </select>
-          
-          <button 
-            onClick={toggleRecording}
-            className={`px-6 py-2 rounded-xl font-medium transition-all ${
-              isRecording ? "bg-red-50 text-red-600 border border-red-200" : "bg-blue-600 text-white"
-            }`}
-          >
-            {isRecording ? "توقف" : "شروع ضبط"}
-          </button>
-        </div>
+    <div style={styles.page}>
+      <h2 style={styles.title}>🎙️ Real-Time Translator</h2>
+
+      <div style={styles.controls}>
+        <button
+          onClick={isListening ? stopListening : startListening}
+          style={{
+            ...styles.btn,
+            background: isListening ? "#dc2626" : "#16a34a",
+          }}
+        >
+          {isListening ? "⏹ Stop" : "▶ Start"}
+        </button>
+        <button onClick={clearAll} style={styles.btnSecondary}>
+          🗑 Clear
+        </button>
       </div>
 
-      {/* Main Chat Area */}
-      <div 
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto space-y-4 px-2 pb-20"
-      >
-        {sentences.map((s) => (
-          <div key={s.id} className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="bg-white p-4 rounded-2xl rounded-tr-none shadow-sm inline-block max-w-[90%] min-w-[150px]">
-              <p className="text-gray-500 text-xs mb-1">شما گفتید:</p>
-              <p className="text-gray-800 mb-2">{s.text}</p>
-              <div className="border-t pt-2 mt-2">
-                <p className="text-gray-500 text-xs mb-1">ترجمه:</p>
-                <p className={`text-blue-600 font-medium ${s.loading ? 'animate-pulse' : ''}`}>
-                  {s.translation}
-                </p>
-              </div>
-            </div>
-          </div>
-        ))}
-
-        {/* Interim Text (Live feedback) */}
-        {interimText && (
-          <div className="flex justify-start">
-            <div className="bg-blue-50 border border-blue-100 p-3 rounded-2xl italic text-blue-400">
-              {interimText}...
-            </div>
-          </div>
-        )}
-      </div>
-
-      {error && (
-        <div className="fixed bottom-24 left-4 right-4 bg-red-500 text-white p-3 rounded-lg text-center shadow-lg">
-          {error}
+      {/* نمایش زنده */}
+      {(interimTranscript || liveTranslation) && (
+        <div style={styles.liveBox}>
+          {interimTranscript && (
+            <p style={styles.interim}>🎤 {interimTranscript}</p>
+          )}
+          {liveTranslation && (
+            <p style={styles.live}>🌐 {liveTranslation}</p>
+          )}
         </div>
       )}
+
+      {/* تاریخچه */}
+      <div style={styles.list}>
+        {sentences.length === 0 && (
+          <p style={styles.empty}>Start رو بزن و حرف بزن...</p>
+        )}
+        {[...sentences].reverse().map((s) => (
+          <div key={s.id} style={styles.item}>
+            <p style={styles.original}>🗣 {s.original}</p>
+            <p style={styles.translated}>
+              {s.translation === "..." ? "⏳ ترجمه..." : `🌍 ${s.translation}`}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   );
+}
+
+const styles = {
+  page: {
+    maxWidth: 680,
+    margin: "0 auto",
+    padding: "32px 20px",
+    fontFamily: "system-ui, sans-serif",
+    background: "#f9fafb",
+    minHeight: "100vh",
+  },
+  title: { fontSize: 22, fontWeight: 700, marginBottom: 20, color: "#111" },
+  controls: { display: "flex", gap: 10, marginBottom: 20 },
+  btn: {
+    padding: "10px 22px",
+    border: "none",
+    borderRadius: 8,
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  btnSecondary: {
+    padding: "10px 18px",
+    border: "1px solid #ddd",
+    borderRadius: 8,
+    background: "#fff",
+    fontSize: 14,
+    cursor: "pointer",
+    color: "#666",
+  },
+  liveBox: {
+    background: "#eff6ff",
+    border: "1px solid #bfdbfe",
+    borderRadius: 10,
+    padding: "14px 18px",
+    marginBottom: 16,
+  },
+  interim: { margin: 0, color: "#1d4ed8", fontSize: 14, marginBottom: 6 },
+  live: { margin: 0, color: "#b45309", fontSize: 15, fontWeight: 500 },
+  list: { display: "flex", flexDirection: "column", gap: 10 },
+  item: {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    padding: "14px 18px",
+  },
+  original: { margin: 0, color: "#374151", fontSize: 14, marginBottom: 6 },
+  translated: { margin: 0, color: "#065f46", fontSize: 15, fontWeight: 500 },
+  empty: { textAlign: "center", color: "#9ca3af", marginTop: 40, fontSize: 14 },
 };
-export default RealTimeTranslator;
