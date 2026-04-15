@@ -371,7 +371,6 @@ function TranslationPanel({ title, sentences, isActive, side }) {
 export default function Home() {
   const [isListening, setIsListening] = useState(false);
   const [micLang, setMicLang] = useState("fa");
-  const [detectedLang, setDetectedLang] = useState(null);
   const [supported, setSupported] = useState(true);
   const [error, setError] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -455,17 +454,13 @@ export default function Home() {
       const res = await fetch("/api/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.trim() }),
+        body: JSON.stringify({ 
+          text: text.trim(),
+          sourceLang: langRef.current // <--- اینجا زبان میکروفون رو ارسال می‌کنیم
+        }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-
-      setDetectedLang(data.detected);
-      // Auto-switch mic language if detected language differs
-      if (data.detected && data.detected !== langRef.current) {
-        langRef.current = data.detected;
-        setMicLang(data.detected);
-      }
 
       setSentences((prev) =>
         prev.map((s) =>
@@ -577,7 +572,6 @@ export default function Home() {
       setConfidence(0);
     } else {
       setSentences([]);
-      setDetectedLang(null);
       setError("");
       setInterimTranscript("");
       setConfidence(0);
@@ -594,7 +588,6 @@ export default function Home() {
   const clearAll = useCallback(() => {
     if (isListeningRef.current) return;
     setSentences([]);
-    setDetectedLang(null);
     setError("");
     setInterimTranscript("");
     setConfidence(0);
@@ -612,8 +605,7 @@ export default function Home() {
     };
   }, []);
 
-  const originalLang = detectedLang || micLang;
-  const isPersianInput = originalLang === "fa";
+  const isPersianInput = micLang === "fa";
 
   return (
     <>
@@ -788,7 +780,7 @@ export default function Home() {
           <MicButton isListening={isListening} onClick={toggleListening} disabled={!supported} />
 
           <div style={{ minWidth: 80 }}>
-            {detectedLang && <LangBadge lang={detectedLang} confidence={confidence} />}
+            {<LangBadge lang={micLang} confidence={confidence} />}
           </div>
         </div>
 
