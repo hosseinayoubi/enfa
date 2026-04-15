@@ -45,5 +45,5 @@ HTTPS is required (Vercel provides this automatically).
 ## Tech Stack
 - Next.js 14 (Pages Router)
 - Web Speech API (browser built-in)
-- OpenAI API — `gpt-4.1-nano`
+- OpenAI API — `gpt-4o-mini`
 - Deployed on Vercel
