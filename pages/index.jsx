@@ -397,7 +397,7 @@ export default function Home() {
   // ── Keep langRef in sync ────────────────────────────────────────────────────
   useEffect(() => { langRef.current = micLang; }, [micLang]);
 
-  // ── Volume Monitor (Optimized for Performance) ─────────────────────────────
+  // ── Volume Monitor ─────────────────────────────────────────────────────────
   const startVolumeMonitor = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -417,13 +417,11 @@ export default function Home() {
         analyser.getByteFrequencyData(data);
         const avg = data.reduce((a, b) => a + b, 0) / data.length;
         const currentVol = Math.min(avg / 128, 1);
-        
-        // Update DOM directly for smooth bar animation without React state lag
+
         if (volumeBarRef.current) {
           volumeBarRef.current.style.width = `${currentVol * 100}%`;
         }
 
-        // Update React state sparsely (only for conditional rendering messages)
         const now = Date.now();
         if (now - lastStateUpdate > 500) {
           setVolume(currentVol);
@@ -454,9 +452,9 @@ export default function Home() {
       const res = await fetch("/api/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           text: text.trim(),
-          sourceLang: langRef.current // <--- اینجا زبان میکروفون رو ارسال می‌کنیم
+          sourceLang: langRef.current,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -499,8 +497,15 @@ export default function Home() {
     if (!SR) { setSupported(false); return; }
     if (!isListeningRef.current) return;
 
-    try { recognitionRef.current?.stop(); } catch {}
+    // ✅ FIX: null out onend BEFORE stop — prevents ghost restart loop
+    const oldRec = recognitionRef.current;
     recognitionRef.current = null;
+    if (oldRec) {
+      oldRec.onend = null;
+      oldRec.onresult = null;
+      oldRec.onerror = null;
+      try { oldRec.stop(); } catch {}
+    }
 
     const rec = new SR();
     rec.continuous = true;
@@ -510,9 +515,12 @@ export default function Home() {
 
     rec.onresult = (e) => {
       let interim = "";
+      let hadFinal = false; // ✅ FIX: prevent double-commit
+
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const result = e.results[i];
         if (result.isFinal) {
+          hadFinal = true;
           clearTimeout(silenceTimerRef.current);
           currentInterimRef.current = "";
           setConfidence(result[0].confidence || 0.9);
@@ -522,16 +530,17 @@ export default function Home() {
           interim += result[0].transcript;
         }
       }
-      if (interim) {
+
+      // ✅ FIX: only set silence timer when no final result in this batch
+      if (interim && !hadFinal) {
         currentInterimRef.current = interim;
         setInterimTranscript(interim);
-        
-        // Timer reduced to 700ms for faster real-time transcription
         clearTimeout(silenceTimerRef.current);
+        // ⚡ 200ms silence timeout — fast commit, no hesitation
         silenceTimerRef.current = setTimeout(() => {
           const txt = currentInterimRef.current.trim();
           if (txt) commitSentence(txt);
-        }, 700);
+        }, 200);
       }
     };
 
@@ -549,11 +558,12 @@ export default function Home() {
     };
 
     rec.onend = () => {
-      if (isListeningRef.current) setTimeout(() => restartRef.current?.(), 250);
+      // ⚡ 80ms restart — almost instant, no audible gap
+      if (isListeningRef.current) setTimeout(() => restartRef.current?.(), 80);
     };
 
     recognitionRef.current = rec;
-    try { rec.start(); } catch { setTimeout(() => restartRef.current?.(), 500); }
+    try { rec.start(); } catch { setTimeout(() => restartRef.current?.(), 150); }
   }, [commitSentence]);
 
   useEffect(() => { restartRef.current = createAndStart; }, [createAndStart]);
@@ -564,8 +574,17 @@ export default function Home() {
       isListeningRef.current = false;
       clearTimeout(silenceTimerRef.current);
       currentInterimRef.current = "";
-      try { recognitionRef.current?.stop(); } catch {}
+
+      // ✅ FIX: kill onend before stopping to prevent restart after manual stop
+      const rec = recognitionRef.current;
       recognitionRef.current = null;
+      if (rec) {
+        rec.onend = null;
+        rec.onresult = null;
+        rec.onerror = null;
+        try { rec.stop(); } catch {}
+      }
+
       stopVolumeMonitor();
       setIsListening(false);
       setInterimTranscript("");
@@ -601,7 +620,13 @@ export default function Home() {
       cancelAnimationFrame(animFrameRef.current);
       audioCtxRef.current?.close();
       streamRef.current?.getTracks().forEach((t) => t.stop());
-      try { recognitionRef.current?.stop(); } catch {}
+      const rec = recognitionRef.current;
+      if (rec) {
+        rec.onend = null;
+        rec.onresult = null;
+        rec.onerror = null;
+        try { rec.stop(); } catch {}
+      }
     };
   }, []);
 
