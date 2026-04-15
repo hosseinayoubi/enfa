@@ -433,23 +433,19 @@ export default function Home() {
   }, []);
 
   // ── Translate ───────────────────────────────────────────────────────────────
-  const translateSentence = useCallback(async (id, text) => {
+const translateSentence = useCallback(async (id, text) => {
     setSentences((prev) => prev.map((s) => (s.id === id ? { ...s, translating: true } : s)));
     try {
       const res = await fetch("/api/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.trim() }),
+        body: JSON.stringify({ 
+          text: text.trim(),
+          sourceLang: langRef.current // ارسال زبان فعلی میکروفون
+        }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-
-      setDetectedLang(data.detected);
-      // Auto-switch mic language if detected language differs
-      if (data.detected && data.detected !== langRef.current) {
-        langRef.current = data.detected;
-        setMicLang(data.detected);
-      }
 
       setSentences((prev) =>
         prev.map((s) =>
@@ -462,7 +458,6 @@ export default function Home() {
       setSentences((prev) => prev.map((s) => (s.id === id ? { ...s, translating: false } : s)));
     }
   }, []);
-
   // ── Commit Sentence ─────────────────────────────────────────────────────────
   const commitSentence = useCallback(
     (text) => {
@@ -519,7 +514,7 @@ export default function Home() {
         silenceTimerRef.current = setTimeout(() => {
           const txt = currentInterimRef.current.trim();
           if (txt) commitSentence(txt);
-        }, 1500);
+        }, 600);
       }
     };
 
